@@ -7,12 +7,12 @@ RUN apk add --no-cache musl-dev openssl-dev
 WORKDIR /app
 COPY ./ /app
 RUN cargo build --release
-RUN strip target/release/thumbs
+RUN strip target/release/thumbs-248-no
 
 # Prod stage
 
 # alpine version must match build stage
 FROM alpine:3.20
 RUN apk add --no-cache libgcc
-COPY --from=builder /app/target/release/thumbs /
-ENTRYPOINT ["/thumbs"]
+COPY --from=builder /app/target/release/thumbs-248-no /
+ENTRYPOINT ["/thumbs-248-no"]
