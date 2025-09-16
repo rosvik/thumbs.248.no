@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <link rel="icon" type="image/svg+xml" href="https://248.no/favicon.svg" />
+    <title>thumbs.248.no</title>
+    <style>
+      * {
+        font-family: "Berkeley Mono", Menlo, monospace;
+        font-size: 12px;
+        color: white;
+      }
+      ::placeholder {
+        opacity: 0.5;
+      }
+      body {
+        background-color: #0f1419;
+        max-width: 500px;
+        margin: auto;
+        padding: 2em;
+      }
+      form > * {
+        padding: 0.2em;
+        margin: 0.4em;
+      }
+      input {
+        background-color: #1f2931;
+        border: 1px solid gray;
+        padding: 1em;
+        outline: none;
+      }
+      input {
+        width: calc(100% - 2em - 2px);
+      }
+      input:invalid {
+        border-color: #b02303;
+      }
+      input:focus {
+        border-color: white;
+      }
+      input[type="submit"] {
+        width: 100%;
+        text-transform: uppercase;
+        border-color: rgba(242, 151, 24, 0.5);
+        background-color: rgba(242, 151, 24, 0.3);
+      }
+      input[type="submit"]:focus,
+      input[type="submit"]:hover {
+        border-color: rgb(242, 151, 24);
+        background-color: rgba(242, 151, 24, 0.5);
+      }
+      input[type="submit"]:hover {
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <form id="thumbnail-form">
+      <h1>Get YouTube thumbnail</h1>
+      <input
+        type="text"
+        name="input"
+        id="input"
+        placeholder="YouTube URL or video ID"
+        required
+        autofocus
+      />
+      <input type="submit" value="Submit" />
+    </form>
+    <script>
+      document
+        .getElementById("thumbnail-form")
+        .addEventListener("submit", function (e) {
+          e.preventDefault();
+          const value = document.getElementById("input").value.trim();
+          let videoId = null;
+          if (isYouTubeId(value)) videoId = value;
+
+          let url = null;
+          if (!videoId) {
+            try {
+              url = new URL(value);
+            } catch {}
+          }
+          if (!videoId && url) videoId = getIdFromDefaultUrl(url);
+          if (!videoId && url) videoId = getIdFromShortUrl(url);
+          if (!videoId && url) videoId = getIdFromThumbnailUrl(url);
+
+          if (videoId) {
+            window.location.href = `/${videoId}`;
+          } else {
+            document.getElementById("input").setCustomValidity("Invalid input");
+          }
+        });
+
+      // https://www.youtube.com/watch?v=0DrlYGIoesQ
+      function getIdFromDefaultUrl(url) {
+        if (url.hostname.endsWith("youtube.com")) {
+          let videoId = url.searchParams.get("v");
+          if (isYouTubeId(videoId)) return videoId;
+        }
+      }
+      // https://youtu.be/0DrlYGIoesQ
+      function getIdFromShortUrl(url) {
+        if (url.hostname.endsWith("youtu.be")) {
+          let videoId = url.pathname.slice(1);
+          if (isYouTubeId(videoId)) return videoId;
+        }
+      }
+      // https://i.ytimg.com/vi/0DrlYGIoesQ/maxresdefault.jpg
+      function getIdFromThumbnailUrl(url) {
+        if (url.hostname.endsWith("ytimg.com")) {
+          let videoId = url.pathname.split("/")[2];
+          if (isYouTubeId(videoId)) return videoId;
+        }
+      }
+      function isYouTubeId(value) {
+        return /^[A-Za-z0-9_-]{10}[AEIMQUYcgkosw048]$/.test(value);
+      }
+    </script>
+  </body>
+</html>

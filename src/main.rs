@@ -1,5 +1,10 @@
 use axum::{
-    Router, body::Body, extract::Path, http::Response, response::IntoResponse, routing::get,
+    Router,
+    body::Body,
+    extract::Path,
+    http::Response,
+    response::{Html, IntoResponse},
+    routing::get,
 };
 use regex::Regex;
 use tokio::{fs::File, io::AsyncWriteExt};
@@ -10,12 +15,16 @@ const THUMBNAIL_DIR: &str = "thumbnails";
 async fn main() {
     dotenv::dotenv().ok();
     let app = Router::new()
-        .route("/", get(|| async { "Hello, World!" }))
+        .route("/", get(index))
         .route("/{video_id}", get(get_thumbnail));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:2342").await.unwrap();
     println!("Listening on http://{}", listener.local_addr().unwrap());
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn index() -> Html<&'static str> {
+    Html(include_str!("../templates/index.html"))
 }
 
 async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
