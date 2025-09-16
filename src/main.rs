@@ -48,8 +48,15 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
     let file_data = body.clone();
     tokio::spawn(async move {
         let file = File::create(path).await;
+        if let Err(e) = file {
+            println!("Error creating thumbnail file: {e}");
+            return;
+        }
         if let Ok(mut file) = file {
-            let _ = file.write_all(&file_data).await;
+            let result = file.write_all(&file_data).await;
+            if let Err(e) = result {
+                println!("Error writing thumbnail file: {e}");
+            }
         }
     });
 
