@@ -8,7 +8,7 @@ jobs:
     name: Push Container
     uses: rosvik/workflows/.github/workflows/push-container.yml@main
     with:
-      image: rosvik/hello
+      image: rosvik/thumbs.248.no
       registry_url: cubby.no
       registry_username: rosvik
     secrets:
