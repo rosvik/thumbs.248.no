@@ -1224,7 +1224,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "thumbs"
+name = "thumbs-248-no"
 version = "0.1.0"
 dependencies = [
  "axum",
