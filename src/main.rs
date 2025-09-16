@@ -4,8 +4,11 @@ use axum::{
 use regex::Regex;
 use tokio::{fs::File, io::AsyncWriteExt};
 
+const THUMBNAIL_DIR: &str = "thumbnails";
+
 #[tokio::main]
 async fn main() {
+    dotenv::dotenv().ok();
     let app = Router::new()
         .route("/", get(|| async { "Hello, World!" }))
         .route("/{video_id}", get(get_thumbnail));
@@ -44,7 +47,8 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
     let body = response.bytes().await.unwrap();
 
     // Save the image to a file
-    let path = format!("thumbnails/{}.webp", video_id);
+    let thumbnail_dir = std::env::var("THUMBNAIL_DIR").unwrap_or(THUMBNAIL_DIR.to_string());
+    let path = format!("{thumbnail_dir}/{video_id}.webp");
     let file_data = body.clone();
     tokio::spawn(async move {
         let file = File::create(path).await;

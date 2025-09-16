@@ -15,4 +15,6 @@ RUN strip target/release/thumbs-248-no
 FROM alpine:3.20
 RUN apk add --no-cache libgcc
 COPY --from=builder /app/target/release/thumbs-248-no /
+
+ENV THUMBNAIL_DIR=/thumbnails
 ENTRYPOINT ["/thumbs-248-no"]
