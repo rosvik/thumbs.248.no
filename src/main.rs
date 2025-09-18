@@ -29,7 +29,8 @@ async fn index() -> Html<&'static str> {
 }
 
 async fn get_all_thumbnails() -> impl IntoResponse {
-    let thumbnails = std::fs::read_dir(THUMBNAIL_DIR).unwrap();
+    let thumbnail_dir = std::env::var("THUMBNAIL_DIR").unwrap_or(THUMBNAIL_DIR.to_string());
+    let thumbnails = std::fs::read_dir(thumbnail_dir).unwrap();
     let thumbnails = thumbnails
         .map(|entry| entry.unwrap().path())
         .collect::<Vec<_>>();
