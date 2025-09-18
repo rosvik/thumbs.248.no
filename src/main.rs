@@ -8,6 +8,7 @@ use axum::{
 };
 use regex::Regex;
 use tokio::{fs::File, io::AsyncWriteExt};
+use tower_http::cors::{Any, CorsLayer};
 
 const THUMBNAIL_DIR: &str = "thumbnails";
 
@@ -17,7 +18,8 @@ async fn main() {
     let app = Router::new()
         .route("/", get(index))
         .route("/all", get(get_all_thumbnails))
-        .route("/{video_id}", get(get_thumbnail));
+        .route("/{video_id}", get(get_thumbnail))
+        .layer(CorsLayer::new().allow_origin(Any));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:2342").await.unwrap();
     println!("Listening on http://{}", listener.local_addr().unwrap());
