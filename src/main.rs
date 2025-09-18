@@ -16,6 +16,7 @@ async fn main() {
     dotenv::dotenv().ok();
     let app = Router::new()
         .route("/", get(index))
+        .route("/all", get(get_all_thumbnails))
         .route("/{video_id}", get(get_thumbnail));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:2342").await.unwrap();
@@ -25,6 +26,26 @@ async fn main() {
 
 async fn index() -> Html<&'static str> {
     Html(include_str!("../templates/index.html"))
+}
+
+async fn get_all_thumbnails() -> impl IntoResponse {
+    let thumbnails = std::fs::read_dir(THUMBNAIL_DIR).unwrap();
+    let thumbnails = thumbnails
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    thumbnails
+        .iter()
+        .map(|path| {
+            path.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .split(".")
+                .next()
+                .unwrap()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
 }
 
 async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
