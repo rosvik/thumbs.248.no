@@ -46,7 +46,7 @@ async fn get_all_thumbnails() -> impl IntoResponse {
                 .unwrap()
         })
         .collect::<Vec<_>>()
-        .join("\n");
+        .join("\n")
 }
 
 async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
