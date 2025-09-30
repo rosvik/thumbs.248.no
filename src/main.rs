@@ -21,6 +21,7 @@ impl fmt::Display for Quality {
         write!(f, "{}", format!("{:?}", self).to_lowercase())
     }
 }
+const SUPPORTED_QUALITIES: [Quality; 2] = [Quality::Maxresdefault, Quality::Sddefault];
 
 const DEFAULT_THUMBNAIL_DIR: &str = "thumbnails";
 fn thumbnail_dir() -> PathBuf {
@@ -56,7 +57,7 @@ async fn get_all_thumbnails() -> impl IntoResponse {
     let thumbnail_dir = thumbnail_dir();
     let mut thumbnails: Vec<PathBuf> = Vec::new();
 
-    for quality in [Quality::Maxresdefault, Quality::Sddefault] {
+    for quality in SUPPORTED_QUALITIES {
         let dir = std::fs::read_dir(thumbnail_dir.join(quality.to_string())).unwrap();
         let files = dir.map(|entry| entry.unwrap().path()).collect::<Vec<_>>();
         thumbnails.extend(files);
@@ -91,7 +92,7 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
 
     let mut quality: Option<Quality> = None;
     let mut body: Option<Bytes> = None;
-    for q in [Quality::Maxresdefault, Quality::Sddefault] {
+    for q in SUPPORTED_QUALITIES {
         if let Ok(b) = fetch_thumbnail(&video_id, &q).await {
             body = Some(b);
             quality = Some(q);
@@ -154,7 +155,7 @@ async fn save_to_cache(video_id: &str, quality: &Quality, data: Bytes) {
 }
 
 async fn fetch_from_cache(video_id: &str) -> Option<(Vec<u8>, Quality)> {
-    for quality in [Quality::Maxresdefault, Quality::Sddefault] {
+    for quality in SUPPORTED_QUALITIES {
         let path = thumbnail_path(video_id, &quality);
         if std::fs::metadata(&path).is_ok() {
             let data = match std::fs::read(&path) {
