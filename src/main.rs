@@ -11,7 +11,7 @@ use std::{fmt, path::PathBuf};
 use tokio::{fs::File, io::AsyncWriteExt};
 use tower_http::cors::{Any, CorsLayer};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum Quality {
     Maxresdefault,
     Sddefault,
@@ -20,6 +20,18 @@ enum Quality {
 impl fmt::Display for Quality {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", format!("{:?}", self).to_lowercase())
+    }
+}
+trait FileExtension {
+    fn file_extension(&self) -> &str;
+}
+impl FileExtension for Quality {
+    fn file_extension(&self) -> &str {
+        match self {
+            Quality::Maxresdefault => "webp",
+            Quality::Sddefault => "webp",
+            Quality::Hqdefault => "jpg",
+        }
     }
 }
 
@@ -39,7 +51,7 @@ fn thumbnail_dir() -> PathBuf {
 fn thumbnail_path(video_id: &str, quality: &Quality) -> PathBuf {
     thumbnail_dir()
         .join(quality.to_string())
-        .join(format!("{video_id}.webp"))
+        .join(format!("{video_id}.{}", quality.file_extension()))
 }
 fn init_thumbnail_dirs() {
     for quality in SUPPORTED_QUALITIES {
@@ -103,7 +115,7 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
     let cached_data = fetch_from_cache(&video_id).await;
     if let Some((data, quality)) = cached_data {
         println!("Returning cached {quality} thumbnail for {video_id}");
-        return webp_response(data);
+        return image_response(data, &quality);
     }
 
     let mut quality: Option<Quality> = None;
@@ -124,14 +136,22 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
     save_to_cache(&video_id, &quality, body.clone()).await;
 
     println!("Fetched {quality} thumbnail for {video_id}");
-    webp_response(body.to_vec())
+    image_response(body.to_vec(), &quality)
 }
 
 async fn fetch_thumbnail(
     video_id: &str,
     quality: &Quality,
 ) -> Result<Bytes, Box<dyn std::error::Error>> {
-    let url = format!("https://i.ytimg.com/vi_webp/{video_id}/{quality}.webp");
+    let webp_postfix = if quality == &Quality::Maxresdefault {
+        "_webp"
+    } else {
+        ""
+    };
+    let url = format!(
+        "https://i.ytimg.com/vi{webp_postfix}/{video_id}/{quality}.{}",
+        quality.file_extension()
+    );
     let response = match reqwest::get(&url).await {
         Ok(response) => response,
         Err(e) => {
@@ -187,9 +207,14 @@ async fn fetch_from_cache(video_id: &str) -> Option<(Vec<u8>, Quality)> {
     None
 }
 
-fn webp_response(data: Vec<u8>) -> Response<Body> {
+fn image_response(data: Vec<u8>, quality: &Quality) -> Response<Body> {
+    let content_type = match quality.file_extension() {
+        "webp" => "image/webp",
+        "jpg" => "image/jpeg",
+        _ => panic!("Unsupported file extension: {}", quality.file_extension()),
+    };
     Response::builder()
-        .header("Content-Type", "image/webp")
+        .header("Content-Type", content_type)
         .body(Body::from(data))
         .unwrap()
 }
@@ -229,6 +254,10 @@ mod tests {
         assert_eq!(
             thumbnail_path("aGb3AlQrN9E", &Quality::Sddefault),
             PathBuf::from("thumbnails/sddefault/aGb3AlQrN9E.webp")
+        );
+        assert_eq!(
+            thumbnail_path("aGb3AlQrN9E", &Quality::Hqdefault),
+            PathBuf::from("thumbnails/hqdefault/aGb3AlQrN9E.jpg")
         );
     }
 }
