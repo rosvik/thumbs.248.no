@@ -34,10 +34,19 @@ fn thumbnail_path(video_id: &str, quality: &Quality) -> PathBuf {
         .join(quality.to_string())
         .join(format!("{video_id}.webp"))
 }
+fn init_thumbnail_dirs() {
+    for quality in SUPPORTED_QUALITIES {
+        match std::fs::create_dir_all(thumbnail_dir().join(quality.to_string())) {
+            Ok(_) => (),
+            Err(e) => println!("Error creating thumbnail directory: {e}"),
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();
+    init_thumbnail_dirs();
     let app = Router::new()
         .route("/", get(index))
         .route("/all", get(get_all_thumbnails))
