@@ -54,10 +54,14 @@ async fn index() -> Html<&'static str> {
 
 async fn get_all_thumbnails() -> impl IntoResponse {
     let thumbnail_dir = thumbnail_dir();
-    let thumbnails = std::fs::read_dir(thumbnail_dir).unwrap();
-    let thumbnails = thumbnails
-        .map(|entry| entry.unwrap().path())
-        .collect::<Vec<_>>();
+    let mut thumbnails: Vec<PathBuf> = Vec::new();
+
+    for quality in [Quality::Maxresdefault, Quality::Sddefault] {
+        let dir = std::fs::read_dir(thumbnail_dir.join(quality.to_string())).unwrap();
+        let files = dir.map(|entry| entry.unwrap().path()).collect::<Vec<_>>();
+        thumbnails.extend(files);
+    }
+
     thumbnails
         .iter()
         .map(|path| {
