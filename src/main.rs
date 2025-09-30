@@ -14,6 +14,7 @@ use tower_http::cors::{Any, CorsLayer};
 #[derive(Debug)]
 enum Quality {
     Maxresdefault,
+    Sddefault,
 }
 impl fmt::Display for Quality {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -27,7 +28,7 @@ fn thumbnail_dir() -> PathBuf {
         .unwrap_or(DEFAULT_THUMBNAIL_DIR.to_string())
         .into()
 }
-fn thumbnail_path(video_id: &str, quality: Quality) -> PathBuf {
+fn thumbnail_path(video_id: &str, quality: &Quality) -> PathBuf {
     thumbnail_dir()
         .join(quality.to_string())
         .join(format!("{video_id}.webp"))
@@ -79,35 +80,60 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
 
     // If the image is already cached, return it
     let cached_data = fetch_from_cache(&video_id).await;
-    if let Some(cached_data) = cached_data {
-        println!("Returning cached thumbnail for {video_id}");
-        return webp_response(cached_data);
+    if let Some((data, quality)) = cached_data {
+        println!("Returning cached {quality} thumbnail for {video_id}");
+        return webp_response(data);
     }
 
-    let url = format!("https://i.ytimg.com/vi_webp/{video_id}/maxresdefault.webp");
+    let mut quality: Option<Quality> = None;
+    let mut body: Option<Bytes> = None;
+    for q in [Quality::Maxresdefault, Quality::Sddefault] {
+        if let Ok(b) = fetch_thumbnail(&video_id, &q).await {
+            body = Some(b);
+            quality = Some(q);
+            break;
+        }
+    }
+    if body.is_none() || quality.is_none() {
+        return fallback_response(500);
+    }
+    let body = body.unwrap();
+    let quality = quality.unwrap();
+
+    save_to_cache(&video_id, &quality, body.clone()).await;
+
+    println!("Fetched {quality} thumbnail for {video_id}");
+    webp_response(body.to_vec())
+}
+
+async fn fetch_thumbnail(
+    video_id: &str,
+    quality: &Quality,
+) -> Result<Bytes, Box<dyn std::error::Error>> {
+    let url = format!("https://i.ytimg.com/vi_webp/{video_id}/{quality}.webp");
     let response = match reqwest::get(&url).await {
         Ok(response) => response,
         Err(e) => {
-            println!("Error fetching thumbnail: {url}: {e}");
-            return fallback_response(500);
+            println!("Error fetching {quality} thumbnail: {url}: {e}");
+            return Err(Box::new(e));
         }
     };
 
     if response.status() != 200 {
-        println!("Error fetching thumbnail: {url}: {}", response.status());
-        return fallback_response(response.status().into());
+        println!(
+            "Error fetching {quality} thumbnail for {video_id}: {}",
+            response.status()
+        );
+        return Err(Box::new(std::io::Error::other(
+            response.status().as_str().to_string(),
+        )));
     }
 
-    let body = response.bytes().await.unwrap();
-
-    save_to_cache(&video_id, body.clone()).await;
-
-    println!("Fetched new thumbnail for {}", video_id);
-    webp_response(body.to_vec())
+    Ok(response.bytes().await?)
 }
 
-async fn save_to_cache(video_id: &str, data: Bytes) {
-    let path = thumbnail_path(video_id, Quality::Maxresdefault);
+async fn save_to_cache(video_id: &str, quality: &Quality, data: Bytes) {
+    let path = thumbnail_path(video_id, quality);
     tokio::spawn(async move {
         let file = File::create(path).await;
         if let Err(e) = file {
@@ -123,17 +149,19 @@ async fn save_to_cache(video_id: &str, data: Bytes) {
     });
 }
 
-async fn fetch_from_cache(video_id: &str) -> Option<Vec<u8>> {
-    let path = thumbnail_path(video_id, Quality::Maxresdefault);
-    if std::fs::metadata(&path).is_ok() {
-        let data = match std::fs::read(&path) {
-            Ok(data) => data,
-            Err(e) => {
-                println!("Error reading cached thumbnail: {}: {}", path.display(), e);
-                return None;
-            }
-        };
-        return Some(data);
+async fn fetch_from_cache(video_id: &str) -> Option<(Vec<u8>, Quality)> {
+    for quality in [Quality::Maxresdefault, Quality::Sddefault] {
+        let path = thumbnail_path(video_id, &quality);
+        if std::fs::metadata(&path).is_ok() {
+            let data = match std::fs::read(&path) {
+                Ok(data) => data,
+                Err(e) => {
+                    println!("Error reading cached thumbnail: {}: {}", path.display(), e);
+                    return None;
+                }
+            };
+            return Some((data, quality));
+        }
     }
     None
 }
@@ -174,8 +202,12 @@ mod tests {
     #[test]
     fn test_thumbnail_path() {
         assert_eq!(
-            thumbnail_path("aGb3AlQrN9E", Quality::Maxresdefault),
+            thumbnail_path("aGb3AlQrN9E", &Quality::Maxresdefault),
             PathBuf::from("thumbnails/maxresdefault/aGb3AlQrN9E.webp")
+        );
+        assert_eq!(
+            thumbnail_path("aGb3AlQrN9E", &Quality::Sddefault),
+            PathBuf::from("thumbnails/sddefault/aGb3AlQrN9E.webp")
         );
     }
 }
