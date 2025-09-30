@@ -1,6 +1,6 @@
 use axum::{
     Router,
-    body::Body,
+    body::{Body, Bytes},
     extract::Path,
     http::Response,
     response::{Html, IntoResponse},
@@ -100,9 +100,14 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
 
     let body = response.bytes().await.unwrap();
 
-    // Save the image to a file
-    let path = thumbnail_path(&video_id, Quality::Maxresdefault);
-    let file_data = body.clone();
+    save_to_cache(&video_id, body.clone()).await;
+
+    println!("Fetched new thumbnail for {}", video_id);
+    webp_response(body.to_vec())
+}
+
+async fn save_to_cache(video_id: &str, data: Bytes) {
+    let path = thumbnail_path(video_id, Quality::Maxresdefault);
     tokio::spawn(async move {
         let file = File::create(path).await;
         if let Err(e) = file {
@@ -110,15 +115,12 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
             return;
         }
         if let Ok(mut file) = file {
-            let result = file.write_all(&file_data).await;
+            let result = file.write_all(&data).await;
             if let Err(e) = result {
                 println!("Error writing thumbnail file: {e}");
             }
         }
     });
-
-    println!("Fetched new thumbnail for {}", video_id);
-    webp_response(body.to_vec())
 }
 
 async fn fetch_from_cache(video_id: &str) -> Option<Vec<u8>> {
