@@ -7,10 +7,31 @@ use axum::{
     routing::get,
 };
 use regex::Regex;
+use std::{fmt, path::PathBuf};
 use tokio::{fs::File, io::AsyncWriteExt};
 use tower_http::cors::{Any, CorsLayer};
 
-const THUMBNAIL_DIR: &str = "thumbnails";
+#[derive(Debug)]
+enum Quality {
+    Maxresdefault,
+}
+impl fmt::Display for Quality {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", format!("{:?}", self).to_lowercase())
+    }
+}
+
+const DEFAULT_THUMBNAIL_DIR: &str = "thumbnails";
+fn thumbnail_dir() -> PathBuf {
+    std::env::var("THUMBNAIL_DIR")
+        .unwrap_or(DEFAULT_THUMBNAIL_DIR.to_string())
+        .into()
+}
+fn thumbnail_path(video_id: &str, quality: Quality) -> PathBuf {
+    thumbnail_dir()
+        .join(quality.to_string())
+        .join(format!("{video_id}.webp"))
+}
 
 #[tokio::main]
 async fn main() {
@@ -31,7 +52,7 @@ async fn index() -> Html<&'static str> {
 }
 
 async fn get_all_thumbnails() -> impl IntoResponse {
-    let thumbnail_dir = std::env::var("THUMBNAIL_DIR").unwrap_or(THUMBNAIL_DIR.to_string());
+    let thumbnail_dir = thumbnail_dir();
     let thumbnails = std::fs::read_dir(thumbnail_dir).unwrap();
     let thumbnails = thumbnails
         .map(|entry| entry.unwrap().path())
@@ -80,8 +101,7 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
     let body = response.bytes().await.unwrap();
 
     // Save the image to a file
-    let thumbnail_dir = std::env::var("THUMBNAIL_DIR").unwrap_or(THUMBNAIL_DIR.to_string());
-    let path = format!("{thumbnail_dir}/{video_id}.webp");
+    let path = thumbnail_path(&video_id, Quality::Maxresdefault);
     let file_data = body.clone();
     tokio::spawn(async move {
         let file = File::create(path).await;
@@ -101,13 +121,13 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
     webp_response(body.to_vec())
 }
 
-async fn fetch_from_cache(video_id: &String) -> Option<Vec<u8>> {
-    let path = format!("thumbnails/{video_id}.webp");
+async fn fetch_from_cache(video_id: &str) -> Option<Vec<u8>> {
+    let path = thumbnail_path(video_id, Quality::Maxresdefault);
     if std::fs::metadata(&path).is_ok() {
         let data = match std::fs::read(&path) {
             Ok(data) => data,
             Err(e) => {
-                println!("Error reading cached thumbnail: {}: {}", path, e);
+                println!("Error reading cached thumbnail: {}: {}", path.display(), e);
                 return None;
             }
         };
@@ -138,4 +158,22 @@ fn fallback_response(status: u16) -> Response<Body> {
 fn validate_video_id(video_id: &str) -> bool {
     let re = Regex::new(r"^[A-Za-z0-9_-]{10}[AEIMQUYcgkosw048]$").unwrap();
     re.is_match(video_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_thumbnail_dir() {
+        assert_eq!(thumbnail_dir(), PathBuf::from("thumbnails"));
+    }
+
+    #[test]
+    fn test_thumbnail_path() {
+        assert_eq!(
+            thumbnail_path("aGb3AlQrN9E", Quality::Maxresdefault),
+            PathBuf::from("thumbnails/maxresdefault/aGb3AlQrN9E.webp")
+        );
+    }
 }
