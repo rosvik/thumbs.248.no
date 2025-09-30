@@ -15,13 +15,20 @@ use tower_http::cors::{Any, CorsLayer};
 enum Quality {
     Maxresdefault,
     Sddefault,
+    Hqdefault,
 }
 impl fmt::Display for Quality {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", format!("{:?}", self).to_lowercase())
     }
 }
-const SUPPORTED_QUALITIES: [Quality; 2] = [Quality::Maxresdefault, Quality::Sddefault];
+
+/// Supported qualities for thumbnails, in order of preference
+const SUPPORTED_QUALITIES: [Quality; 3] = [
+    Quality::Maxresdefault,
+    Quality::Sddefault,
+    Quality::Hqdefault,
+];
 
 const DEFAULT_THUMBNAIL_DIR: &str = "thumbnails";
 fn thumbnail_dir() -> PathBuf {
