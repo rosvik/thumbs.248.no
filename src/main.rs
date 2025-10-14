@@ -1,3 +1,4 @@
+use crate::quality::{FileExtension, PathName, Quality, Slug};
 use axum::{
     Router,
     body::{Body, Bytes},
@@ -7,56 +8,11 @@ use axum::{
     routing::get,
 };
 use regex::Regex;
-use std::{fmt, path::PathBuf};
+use std::path::PathBuf;
 use tokio::{fs::File, io::AsyncWriteExt};
 use tower_http::cors::{Any, CorsLayer};
 
-#[derive(Debug, PartialEq)]
-enum Quality {
-    WebpMaxres,
-    WebpSd,
-    JpgHq,
-}
-impl fmt::Display for Quality {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {}", self.slug(), self.file_extension())
-    }
-}
-
-trait PathName {
-    fn path_name(&self) -> PathBuf;
-}
-impl PathName for Quality {
-    fn path_name(&self) -> PathBuf {
-        PathBuf::from(format!("{}/{}", self.slug(), self.file_extension()))
-    }
-}
-
-trait FileExtension {
-    fn file_extension(&self) -> &str;
-}
-impl FileExtension for Quality {
-    fn file_extension(&self) -> &str {
-        match self {
-            Quality::WebpMaxres => "webp",
-            Quality::WebpSd => "webp",
-            Quality::JpgHq => "jpg",
-        }
-    }
-}
-
-trait Slug {
-    fn slug(&self) -> &str;
-}
-impl Slug for Quality {
-    fn slug(&self) -> &str {
-        match self {
-            Quality::WebpMaxres => "maxresdefault",
-            Quality::WebpSd => "sddefault",
-            Quality::JpgHq => "hqdefault",
-        }
-    }
-}
+mod quality;
 
 /// Supported qualities for thumbnails, in order of preference
 const SUPPORTED_QUALITIES: [Quality; 3] = [Quality::WebpMaxres, Quality::WebpSd, Quality::JpgHq];
