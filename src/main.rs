@@ -13,34 +13,53 @@ use tower_http::cors::{Any, CorsLayer};
 
 #[derive(Debug, PartialEq)]
 enum Quality {
-    Maxresdefault,
-    Sddefault,
-    Hqdefault,
+    WebpMaxres,
+    WebpSd,
+    JpgHq,
 }
 impl fmt::Display for Quality {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", format!("{:?}", self).to_lowercase())
+        write!(f, "{} {}", self.slug(), self.file_extension())
     }
 }
+
+trait PathName {
+    fn path_name(&self) -> PathBuf;
+}
+impl PathName for Quality {
+    fn path_name(&self) -> PathBuf {
+        PathBuf::from(format!("{}/{}", self.slug(), self.file_extension()))
+    }
+}
+
 trait FileExtension {
     fn file_extension(&self) -> &str;
 }
 impl FileExtension for Quality {
     fn file_extension(&self) -> &str {
         match self {
-            Quality::Maxresdefault => "webp",
-            Quality::Sddefault => "webp",
-            Quality::Hqdefault => "jpg",
+            Quality::WebpMaxres => "webp",
+            Quality::WebpSd => "webp",
+            Quality::JpgHq => "jpg",
+        }
+    }
+}
+
+trait Slug {
+    fn slug(&self) -> &str;
+}
+impl Slug for Quality {
+    fn slug(&self) -> &str {
+        match self {
+            Quality::WebpMaxres => "maxresdefault",
+            Quality::WebpSd => "sddefault",
+            Quality::JpgHq => "hqdefault",
         }
     }
 }
 
 /// Supported qualities for thumbnails, in order of preference
-const SUPPORTED_QUALITIES: [Quality; 3] = [
-    Quality::Maxresdefault,
-    Quality::Sddefault,
-    Quality::Hqdefault,
-];
+const SUPPORTED_QUALITIES: [Quality; 3] = [Quality::WebpMaxres, Quality::WebpSd, Quality::JpgHq];
 
 const DEFAULT_THUMBNAIL_DIR: &str = "thumbnails";
 fn thumbnail_dir() -> PathBuf {
@@ -50,12 +69,12 @@ fn thumbnail_dir() -> PathBuf {
 }
 fn thumbnail_path(video_id: &str, quality: &Quality) -> PathBuf {
     thumbnail_dir()
-        .join(quality.to_string())
+        .join(quality.path_name())
         .join(format!("{video_id}.{}", quality.file_extension()))
 }
 fn init_thumbnail_dirs() {
     for quality in SUPPORTED_QUALITIES {
-        match std::fs::create_dir_all(thumbnail_dir().join(quality.to_string())) {
+        match std::fs::create_dir_all(thumbnail_dir().join(quality.path_name())) {
             Ok(_) => (),
             Err(e) => println!("Error creating thumbnail directory: {e}"),
         }
@@ -86,7 +105,7 @@ async fn get_all_thumbnails() -> impl IntoResponse {
     let mut thumbnails: Vec<PathBuf> = Vec::new();
 
     for quality in SUPPORTED_QUALITIES {
-        let dir = std::fs::read_dir(thumbnail_dir.join(quality.to_string())).unwrap();
+        let dir = std::fs::read_dir(thumbnail_dir.join(quality.path_name())).unwrap();
         let files = dir.map(|entry| entry.unwrap().path()).collect::<Vec<_>>();
         thumbnails.extend(files);
     }
@@ -143,13 +162,14 @@ async fn fetch_thumbnail(
     video_id: &str,
     quality: &Quality,
 ) -> Result<Bytes, Box<dyn std::error::Error>> {
-    let webp_postfix = if quality == &Quality::Maxresdefault {
+    let webp_postfix = if quality.file_extension() == "webp" {
         "_webp"
     } else {
         ""
     };
     let url = format!(
-        "https://i.ytimg.com/vi{webp_postfix}/{video_id}/{quality}.{}",
+        "https://i.ytimg.com/vi{webp_postfix}/{video_id}/{}.{}",
+        quality.slug(),
         quality.file_extension()
     );
     let response = match reqwest::get(&url).await {
@@ -248,16 +268,16 @@ mod tests {
     #[test]
     fn test_thumbnail_path() {
         assert_eq!(
-            thumbnail_path("aGb3AlQrN9E", &Quality::Maxresdefault),
-            PathBuf::from("thumbnails/maxresdefault/aGb3AlQrN9E.webp")
+            thumbnail_path("aGb3AlQrN9E", &Quality::WebpMaxres),
+            PathBuf::from("thumbnails/maxresdefault/webp/aGb3AlQrN9E.webp")
         );
         assert_eq!(
-            thumbnail_path("aGb3AlQrN9E", &Quality::Sddefault),
-            PathBuf::from("thumbnails/sddefault/aGb3AlQrN9E.webp")
+            thumbnail_path("aGb3AlQrN9E", &Quality::WebpSd),
+            PathBuf::from("thumbnails/sddefault/webp/aGb3AlQrN9E.webp")
         );
         assert_eq!(
-            thumbnail_path("aGb3AlQrN9E", &Quality::Hqdefault),
-            PathBuf::from("thumbnails/hqdefault/aGb3AlQrN9E.jpg")
+            thumbnail_path("aGb3AlQrN9E", &Quality::JpgHq),
+            PathBuf::from("thumbnails/hqdefault/jpg/aGb3AlQrN9E.jpg")
         );
     }
 }
