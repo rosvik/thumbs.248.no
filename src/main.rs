@@ -8,6 +8,7 @@ use axum::{
     routing::get,
 };
 use regex::Regex;
+use reqwest::StatusCode;
 use std::path::PathBuf;
 use tokio::{fs::File, io::AsyncWriteExt};
 use tower_http::cors::{Any, CorsLayer};
@@ -103,10 +104,18 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
     let mut quality: Option<Quality> = None;
     let mut body: Option<Bytes> = None;
     for q in SUPPORTED_QUALITIES {
-        if let Ok(b) = fetch_thumbnail(&video_id, &q).await {
-            body = Some(b);
-            quality = Some(q);
-            break;
+        match fetch_thumbnail(&video_id, &q).await {
+            Ok(b) => {
+                body = Some(b);
+                quality = Some(q);
+                break;
+            }
+            Err(e) => {
+                if e != StatusCode::NOT_FOUND {
+                    return fallback_response(e.as_u16());
+                }
+                continue;
+            }
         }
     }
     if body.is_none() || quality.is_none() {
@@ -121,10 +130,7 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
     image_response(body.to_vec(), &quality)
 }
 
-async fn fetch_thumbnail(
-    video_id: &str,
-    quality: &Quality,
-) -> Result<Bytes, Box<dyn std::error::Error>> {
+async fn fetch_thumbnail(video_id: &str, quality: &Quality) -> Result<Bytes, StatusCode> {
     let webp_postfix = if quality.file_extension() == "webp" {
         "_webp"
     } else {
@@ -139,21 +145,25 @@ async fn fetch_thumbnail(
         Ok(response) => response,
         Err(e) => {
             println!("Error fetching {quality} thumbnail: {url}: {e}");
-            return Err(Box::new(e));
+            return Err(e.status().unwrap_or(StatusCode::INTERNAL_SERVER_ERROR));
         }
     };
 
-    if response.status() != 200 {
+    if response.status() != StatusCode::OK {
         println!(
             "Error fetching {quality} thumbnail for {video_id}: {}",
             response.status()
         );
-        return Err(Box::new(std::io::Error::other(
-            response.status().as_str().to_string(),
-        )));
+        return Err(response.status());
     }
 
-    Ok(response.bytes().await?)
+    match response.bytes().await {
+        Ok(bytes) => Ok(bytes),
+        Err(e) => {
+            println!("Error reading response for {quality} thumbnail for {video_id}: {e}");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }
 
 async fn save_to_cache(video_id: &str, quality: &Quality, data: Bytes) {
