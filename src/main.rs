@@ -15,7 +15,14 @@ use tower_http::cors::{Any, CorsLayer};
 mod quality;
 
 /// Supported qualities for thumbnails, in order of preference
-const SUPPORTED_QUALITIES: [Quality; 3] = [Quality::WebpMaxres, Quality::WebpSd, Quality::JpgHq];
+const SUPPORTED_QUALITIES: [Quality; 6] = [
+    Quality::WebpMaxres,
+    Quality::JpgMaxres,
+    Quality::WebpSd,
+    Quality::JpgSd,
+    Quality::WebpHq,
+    Quality::JpgHq,
+];
 
 const DEFAULT_THUMBNAIL_DIR: &str = "thumbnails";
 fn thumbnail_dir() -> PathBuf {
@@ -228,8 +235,20 @@ mod tests {
             PathBuf::from("thumbnails/maxresdefault/webp/aGb3AlQrN9E.webp")
         );
         assert_eq!(
+            thumbnail_path("aGb3AlQrN9E", &Quality::JpgMaxres),
+            PathBuf::from("thumbnails/maxresdefault/jpg/aGb3AlQrN9E.jpg")
+        );
+        assert_eq!(
             thumbnail_path("aGb3AlQrN9E", &Quality::WebpSd),
             PathBuf::from("thumbnails/sddefault/webp/aGb3AlQrN9E.webp")
+        );
+        assert_eq!(
+            thumbnail_path("aGb3AlQrN9E", &Quality::JpgSd),
+            PathBuf::from("thumbnails/sddefault/jpg/aGb3AlQrN9E.jpg")
+        );
+        assert_eq!(
+            thumbnail_path("aGb3AlQrN9E", &Quality::WebpHq),
+            PathBuf::from("thumbnails/hqdefault/webp/aGb3AlQrN9E.webp")
         );
         assert_eq!(
             thumbnail_path("aGb3AlQrN9E", &Quality::JpgHq),
