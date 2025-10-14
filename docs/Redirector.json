@@ -1,0 +1,31 @@
+{
+    "createdBy": "Redirector v3.5.3",
+    "createdAt": "2025-10-14T20:14:38.782Z",
+    "redirects": [
+        {
+            "description": "thumbs.248.no",
+            "exampleUrl": "https://i1.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg?sqp=X",
+            "exampleResult": "https://thumbs.248.no/dQw4w9WgXcQ",
+            "error": null,
+            "includePattern": "https://*.ytimg.com/vi*/*/*",
+            "excludePattern": "",
+            "patternDesc": "",
+            "redirectUrl": "https://thumbs.248.no/$3",
+            "patternType": "W",
+            "processMatches": "noProcessing",
+            "disabled": false,
+            "grouped": false,
+            "appliesTo": [
+                "sub_frame",
+                "stylesheet",
+                "script",
+                "image",
+                "imageset",
+                "object",
+                "xmlhttprequest",
+                "history",
+                "other"
+            ]
+        }
+    ]
+}

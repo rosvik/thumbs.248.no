@@ -1,34 +1,17 @@
 # thumbs.248.no
 
-This is a simple proxy for YouTube thumbnails. It will fetch the best quality thumbnail for a given YouTube video.
+This is a simple proxy for YouTube thumbnails. It will fetch the best quality thumbnail for a given YouTube video, and cache them. YouTube servers will be queried only the first time a thumbnail is requested.
 
-## Known URL formats
+Go to [thumbs.248.no](https://thumbs.248.no) and enter a YouTube URL or video ID to see it in action.
 
-`https://[DOMAIN].ytimg.com/vi[_webp]/[VIDEO_ID]/[QUALITY].[FORMAT]`
+## Redirector setup
 
-*16:9*
-- https://i.ytimg.com/vi/aGb3AlQrN9E/maxresdefault.jpg
-- https://i.ytimg.com/vi/aGb3AlQrN9E/hq720.jpg
-- https://i.ytimg.com/vi/aGb3AlQrN9E/mqdefault.jpg
+Using Redirector (a browser extension you can download from [here](https://einaregilsson.com/redirector/)), you can redirect any YouTube thumbnail URL to the proxy. This will use the best resolution available for _all_ thumbnails on youtube.com, so expect a bit of extra data usage.
 
-*4:3*
-- https://i.ytimg.com/vi/aGb3AlQrN9E/sddefault.jpg
-- https://i.ytimg.com/vi/aGb3AlQrN9E/hqdefault.jpg
-- https://i.ytimg.com/vi/aGb3AlQrN9E/0.jpg
-- https://i.ytimg.com/vi/aGb3AlQrN9E/default.jpg
+You can import [this predefined rule](./docs/Redirector.json) or manually create a rule with the following settings:
 
-*Domains*
-- https://i.ytimg.com
-- https://i2.ytimg.com
-- https://i3.ytimg.com
-- https://i4.ytimg.com
+- Include pattern: `https://*.ytimg.com/vi*/*/*`
+- Redirect to: `https://thumbs.248.no/$3`
+- In advanced options, check every box under *Apply to* except "Main window (address bar)"
 
-*Image formats*
-- https://i.ytimg.com/vi/aGb3AlQrN9E/maxresdefault.jpg
-- https://i.ytimg.com/vi_webp/aGb3AlQrN9E/maxresdefault.webp
-
-
-## Test cases
-
-- maxresdefault `aGb3AlQrN9E`
-- hqdefault `jNQXAC9IVRw`
+<div align="right"><img src="https://github-production-user-asset-6210df.s3.amazonaws.com/1774972/269361517-d0d8e30e-4a25-4ba2-b926-2a42da1156f8.svg" width="32" alt="248"></div>
