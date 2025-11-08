@@ -40,7 +40,7 @@ fn init_thumbnail_dirs() {
     for quality in SUPPORTED_QUALITIES {
         match std::fs::create_dir_all(thumbnail_dir().join(quality.path_name())) {
             Ok(_) => (),
-            Err(e) => println!("Error creating thumbnail directory: {e}"),
+            Err(e) => println!("ERROR: Error creating thumbnail directory: {e}"),
         }
     }
 }
@@ -97,7 +97,7 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
     // If the image is already cached, return it
     let cached_data = fetch_from_cache(&video_id).await;
     if let Some((data, quality)) = cached_data {
-        println!("Returning cached {quality} thumbnail for {video_id}");
+        println!("CACHE: {video_id} - {quality}");
         return image_response(data, &quality);
     }
 
@@ -126,7 +126,7 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
 
     save_to_cache(&video_id, &quality, body.clone()).await;
 
-    println!("Fetched {quality} thumbnail for {video_id}");
+    println!("NEW: {video_id} - {quality}");
     image_response(body.to_vec(), &quality)
 }
 
@@ -144,23 +144,25 @@ async fn fetch_thumbnail(video_id: &str, quality: &Quality) -> Result<Bytes, Sta
     let response = match reqwest::get(&url).await {
         Ok(response) => response,
         Err(e) => {
-            println!("Error fetching {quality} thumbnail: {url}: {e}");
+            println!("ERROR: Error fetching {quality} thumbnail: {url}: {e}");
             return Err(e.status().unwrap_or(StatusCode::INTERNAL_SERVER_ERROR));
         }
     };
 
     if response.status() != StatusCode::OK {
-        println!(
-            "Error fetching {quality} thumbnail for {video_id}: {}",
-            response.status()
-        );
+        if response.status() != StatusCode::NOT_FOUND {
+            println!(
+                "ERROR: Error fetching {quality} thumbnail for {video_id}: {}",
+                response.status()
+            );
+        }
         return Err(response.status());
     }
 
     match response.bytes().await {
         Ok(bytes) => Ok(bytes),
         Err(e) => {
-            println!("Error reading response for {quality} thumbnail for {video_id}: {e}");
+            println!("ERROR: Error reading response for {quality} thumbnail for {video_id}: {e}");
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
@@ -171,13 +173,13 @@ async fn save_to_cache(video_id: &str, quality: &Quality, data: Bytes) {
     tokio::spawn(async move {
         let file = File::create(path).await;
         if let Err(e) = file {
-            println!("Error creating thumbnail file: {e}");
+            println!("ERROR: Error creating thumbnail file: {e}");
             return;
         }
         if let Ok(mut file) = file {
             let result = file.write_all(&data).await;
             if let Err(e) = result {
-                println!("Error writing thumbnail file: {e}");
+                println!("ERROR: Error writing thumbnail file: {e}");
             }
         }
     });
@@ -190,7 +192,11 @@ async fn fetch_from_cache(video_id: &str) -> Option<(Vec<u8>, Quality)> {
             let data = match std::fs::read(&path) {
                 Ok(data) => data,
                 Err(e) => {
-                    println!("Error reading cached thumbnail: {}: {}", path.display(), e);
+                    println!(
+                        "ERROR: Error reading cached thumbnail: {}: {}",
+                        path.display(),
+                        e
+                    );
                     return None;
                 }
             };
