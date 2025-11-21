@@ -98,7 +98,7 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
     let cached_data = fetch_from_cache(&video_id).await;
     if let Some((data, quality)) = cached_data {
         println!("CACHE: {video_id} - {quality}");
-        return image_response(data, &quality);
+        return image_response(data, &quality, true);
     }
 
     let mut quality: Option<Quality> = None;
@@ -127,7 +127,7 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
     save_to_cache(&video_id, &quality, body.clone()).await;
 
     println!("NEW: {video_id} - {quality}");
-    image_response(body.to_vec(), &quality)
+    image_response(body, &quality, false)
 }
 
 async fn fetch_thumbnail(video_id: &str, quality: &Quality) -> Result<Bytes, StatusCode> {
@@ -206,7 +206,7 @@ async fn fetch_from_cache(video_id: &str) -> Option<(Vec<u8>, Quality)> {
     None
 }
 
-fn image_response(data: Vec<u8>, quality: &Quality) -> Response<Body> {
+fn image_response(data: impl Into<Body>, quality: &Quality, cache_hit: bool) -> Response<Body> {
     let content_type = match quality.file_extension() {
         "webp" => "image/webp",
         "jpg" => "image/jpeg",
@@ -214,7 +214,14 @@ fn image_response(data: Vec<u8>, quality: &Quality) -> Response<Body> {
     };
     Response::builder()
         .header("Content-Type", content_type)
-        .body(Body::from(data))
+        .header(
+            "Cache-Status",
+            match cache_hit {
+                true => "ThumbsCache; hit",
+                false => "ThumbsCache; fwd=uri-miss; stored",
+            },
+        )
+        .body(data.into())
         .unwrap()
 }
 
