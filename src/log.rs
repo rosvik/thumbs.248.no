@@ -9,7 +9,7 @@ pub enum LogType {
 macro_rules! log {
     ($fmt:expr, $log_type:expr $(, $args:expr)* $(,)?) => {{
         let ms = chrono::Local::now().timestamp_subsec_millis();
-        let format_str = format!("%Y-%m-%d %H:%M:%S.{}", ms);
+        let format_str = format!("%Y-%m-%d %H:%M:%S.{:03}", ms);
         let timestamp = chrono::Local::now().format(&format_str);
 
         let color = match $log_type {
