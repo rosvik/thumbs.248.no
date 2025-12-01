@@ -109,7 +109,7 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
     // If the image is already cached, return it
     let cached_data = fetch_from_cache(&video_id).await;
     if let Some((data, quality)) = cached_data {
-        log!("CACHE: {video_id} - {quality}", LogType::Info);
+        log!("CACHE: {video_id} - {quality}", LogType::Debug);
         return image_response(data, &quality, true);
     }
 
