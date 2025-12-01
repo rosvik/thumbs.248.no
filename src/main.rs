@@ -1,4 +1,7 @@
-use crate::quality::{FileExtension, PathName, Quality, Slug};
+use crate::{
+    log::LogType,
+    quality::{FileExtension, PathName, Quality, Slug},
+};
 use axum::{
     Router,
     body::{Body, Bytes},
@@ -13,6 +16,7 @@ use std::path::PathBuf;
 use tokio::{fs::File, io::AsyncWriteExt};
 use tower_http::cors::{Any, CorsLayer};
 
+mod log;
 mod quality;
 
 /// Supported qualities for thumbnails, in order of preference
@@ -40,8 +44,8 @@ fn init_thumbnail_dirs() {
     for quality in SUPPORTED_QUALITIES {
         match std::fs::create_dir_all(thumbnail_dir().join(quality.path_name())) {
             Ok(_) => (),
-            Err(e) => log(
-                &format!("ERROR: Error creating thumbnail directory: {e}"),
+            Err(e) => log!(
+                "ERROR: Error creating thumbnail directory: {e}",
                 LogType::Error,
             ),
         }
@@ -59,7 +63,11 @@ async fn main() {
         .layer(CorsLayer::new().allow_origin(Any));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:2342").await.unwrap();
-    println!("Listening on http://{}", listener.local_addr().unwrap());
+    log!(
+        "Listening on http://{}",
+        LogType::Debug,
+        listener.local_addr().unwrap(),
+    );
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -94,17 +102,14 @@ async fn get_all_thumbnails() -> impl IntoResponse {
 
 async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
     if !validate_video_id(&video_id) {
-        log(
-            &format!("NOT FOUND: Invalid video ID: {video_id}"),
-            LogType::Warning,
-        );
+        log!("NOT FOUND: Invalid video ID: {video_id}", LogType::Warning);
         return fallback_response(400);
     }
 
     // If the image is already cached, return it
     let cached_data = fetch_from_cache(&video_id).await;
     if let Some((data, quality)) = cached_data {
-        log(&format!("CACHE: {video_id} - {quality}"), LogType::Info);
+        log!("CACHE: {video_id} - {quality}", LogType::Info);
         return image_response(data, &quality, true);
     }
 
@@ -133,7 +138,7 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
 
     save_to_cache(&video_id, &quality, body.clone()).await;
 
-    log(&format!("NEW: {video_id} - {quality}"), LogType::Info);
+    log!("NEW: {video_id} - {quality}", LogType::Info);
     image_response(body, &quality, false)
 }
 
@@ -151,9 +156,9 @@ async fn fetch_thumbnail(video_id: &str, quality: &Quality) -> Result<Bytes, Sta
     let response = match reqwest::get(&url).await {
         Ok(response) => response,
         Err(e) => {
-            log(
-                &format!("ERROR: Error fetching {quality} thumbnail: {url}: {e}"),
-                LogType::Error,
+            log!(
+                "ERROR: Error fetching {quality} thumbnail: {url}: {e}",
+                LogType::Error
             );
             return Err(e.status().unwrap_or(StatusCode::INTERNAL_SERVER_ERROR));
         }
@@ -161,12 +166,10 @@ async fn fetch_thumbnail(video_id: &str, quality: &Quality) -> Result<Bytes, Sta
 
     if response.status() != StatusCode::OK {
         if response.status() != StatusCode::NOT_FOUND {
-            log(
-                &format!(
-                    "ERROR: Error fetching {quality} thumbnail for {video_id}: {}",
-                    response.status()
-                ),
+            log!(
+                "ERROR: Error fetching {quality} thumbnail for {video_id}: {}",
                 LogType::Error,
+                response.status(),
             );
         }
         return Err(response.status());
@@ -175,10 +178,8 @@ async fn fetch_thumbnail(video_id: &str, quality: &Quality) -> Result<Bytes, Sta
     match response.bytes().await {
         Ok(bytes) => Ok(bytes),
         Err(e) => {
-            log(
-                &format!(
-                    "ERROR: Error reading response for {quality} thumbnail for {video_id}: {e}"
-                ),
+            log!(
+                "ERROR: Error reading response for {quality} thumbnail for {video_id}: {e}",
                 LogType::Error,
             );
             Err(StatusCode::INTERNAL_SERVER_ERROR)
@@ -191,19 +192,13 @@ async fn save_to_cache(video_id: &str, quality: &Quality, data: Bytes) {
     tokio::spawn(async move {
         let file = File::create(path).await;
         if let Err(e) = file {
-            log(
-                &format!("ERROR: Error creating thumbnail file: {e}"),
-                LogType::Error,
-            );
+            log!("ERROR: Error creating thumbnail file: {e}", LogType::Error);
             return;
         }
         if let Ok(mut file) = file {
             let result = file.write_all(&data).await;
             if let Err(e) = result {
-                log(
-                    &format!("ERROR: Error writing thumbnail file: {e}"),
-                    LogType::Error,
-                );
+                log!("ERROR: Error writing thumbnail file: {e}", LogType::Error);
             }
         }
     });
@@ -216,13 +211,11 @@ async fn fetch_from_cache(video_id: &str) -> Option<(Vec<u8>, Quality)> {
             let data = match std::fs::read(&path) {
                 Ok(data) => data,
                 Err(e) => {
-                    log(
-                        &format!(
-                            "ERROR: Error reading cached thumbnail: {}: {}",
-                            path.display(),
-                            e
-                        ),
+                    log!(
+                        "ERROR: Error reading cached thumbnail: {}: {}",
                         LogType::Error,
+                        path.display(),
+                        e,
                     );
                     return None;
                 }
@@ -267,28 +260,6 @@ fn fallback_response(status: u16) -> Response<Body> {
 fn validate_video_id(video_id: &str) -> bool {
     let re = Regex::new(r"^[A-Za-z0-9_-]{10}[AEIMQUYcgkosw048]$").unwrap();
     re.is_match(video_id)
-}
-
-enum LogType {
-    Info,
-    Warning,
-    Error,
-}
-fn log(message: &str, log_type: LogType) {
-    let ms = chrono::Local::now().timestamp_subsec_millis();
-    let format = format!("%Y-%m-%d %H:%M:%S.{}", ms);
-    let timestamp = chrono::Local::now().format(&format);
-    let color = match log_type {
-        LogType::Info => "\x1b[32m",
-        LogType::Warning => "\x1b[33m",
-        LogType::Error => "\x1b[31m",
-    };
-    let stream: &mut dyn std::io::Write = match log_type {
-        LogType::Info => &mut std::io::stdout(),
-        LogType::Warning => &mut std::io::stderr(),
-        LogType::Error => &mut std::io::stderr(),
-    };
-    let _ = writeln!(stream, "{color}[{timestamp}] {message}\x1b[0m");
 }
 
 #[cfg(test)]
