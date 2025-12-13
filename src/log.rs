@@ -3,6 +3,7 @@ pub enum LogType {
     Info,
     Warning,
     Error,
+    Performance,
 }
 
 #[macro_export]
@@ -17,10 +18,11 @@ macro_rules! log {
             LogType::Info => "\x1b[37m", // white
             LogType::Warning => "\x1b[33m", // yellow
             LogType::Error => "\x1b[31m", // red
+            LogType::Performance => "\x1b[32m", // green
         };
 
         let out: &mut dyn std::io::Write = match $log_type {
-            LogType::Debug | LogType::Info => &mut std::io::stdout(),
+            LogType::Debug | LogType::Info | LogType::Performance => &mut std::io::stdout(),
             LogType::Warning | LogType::Error => &mut std::io::stderr(),
         };
 

@@ -143,6 +143,7 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
 }
 
 async fn fetch_thumbnail(video_id: &str, quality: &Quality) -> Result<Bytes, StatusCode> {
+    let now = std::time::Instant::now();
     let webp_postfix = if quality.file_extension() == "webp" {
         "_webp"
     } else {
@@ -163,7 +164,11 @@ async fn fetch_thumbnail(video_id: &str, quality: &Quality) -> Result<Bytes, Sta
             return Err(e.status().unwrap_or(StatusCode::INTERNAL_SERVER_ERROR));
         }
     };
-
+    log!(
+        "YOUTUBE FETCH: {quality} - {video_id} - {}ms",
+        LogType::Performance,
+        now.elapsed().as_millis(),
+    );
     if response.status() != StatusCode::OK {
         if response.status() != StatusCode::NOT_FOUND {
             log!(
@@ -207,7 +212,13 @@ async fn save_to_cache(video_id: &str, quality: &Quality, data: Bytes) {
 async fn fetch_from_cache(video_id: &str) -> Option<(Vec<u8>, Quality)> {
     for quality in SUPPORTED_QUALITIES {
         let path = thumbnail_path(video_id, &quality);
+        let now = std::time::Instant::now();
         if std::fs::metadata(&path).is_ok() {
+            log!(
+                "CACHE LOOKUP: {video_id} - {quality} - {}ms",
+                LogType::Performance,
+                now.elapsed().as_millis(),
+            );
             let data = match std::fs::read(&path) {
                 Ok(data) => data,
                 Err(e) => {
@@ -220,6 +231,11 @@ async fn fetch_from_cache(video_id: &str) -> Option<(Vec<u8>, Quality)> {
                     return None;
                 }
             };
+            log!(
+                "CACHE READ: {video_id} - {quality} - {}ms",
+                LogType::Performance,
+                now.elapsed().as_millis(),
+            );
             return Some((data, quality));
         }
     }
