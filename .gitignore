@@ -1,3 +1,4 @@
 thumbnails/
 target/
 .DS_Store
+.env
