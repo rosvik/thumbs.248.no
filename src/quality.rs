@@ -1,4 +1,4 @@
-use std::{fmt, path::PathBuf};
+use std::fmt;
 
 #[derive(Debug, PartialEq)]
 pub enum Quality {
@@ -12,15 +12,6 @@ pub enum Quality {
 impl fmt::Display for Quality {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {}", self.slug(), self.file_extension())
-    }
-}
-
-pub trait PathName {
-    fn path_name(&self) -> PathBuf;
-}
-impl PathName for Quality {
-    fn path_name(&self) -> PathBuf {
-        PathBuf::from(format!("{}/{}", self.slug(), self.file_extension()))
     }
 }
 
