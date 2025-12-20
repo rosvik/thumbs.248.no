@@ -1,6 +1,6 @@
 use crate::{
     log::LogType,
-    quality::{FileExtension, PathName, Quality, Slug},
+    quality::{FileExtension, Quality, Slug},
 };
 use axum::{
     Router,
@@ -12,7 +12,6 @@ use axum::{
 };
 use regex::Regex;
 use reqwest::StatusCode;
-use std::path::PathBuf;
 use tokio::{fs::File, io::AsyncWriteExt};
 use tower_http::cors::{Any, CorsLayer};
 
@@ -29,12 +28,6 @@ const SUPPORTED_QUALITIES: [Quality; 6] = [
     Quality::JpgHq,
 ];
 
-const DEFAULT_THUMBNAIL_DIR: &str = "thumbnails";
-fn thumbnail_dir() -> PathBuf {
-    std::env::var("THUMBNAIL_DIR")
-        .unwrap_or(DEFAULT_THUMBNAIL_DIR.to_string())
-        .into()
-}
 fn s3_key(video_id: &str, quality: &Quality) -> String {
     let prefix = video_id.split_at(2).0;
     format!(
@@ -43,22 +36,10 @@ fn s3_key(video_id: &str, quality: &Quality) -> String {
         quality.file_extension()
     )
 }
-fn init_thumbnail_dirs() {
-    for quality in SUPPORTED_QUALITIES {
-        match std::fs::create_dir_all(thumbnail_dir().join(quality.path_name())) {
-            Ok(_) => (),
-            Err(e) => log!(
-                "ERROR: Error creating thumbnail directory: {e}",
-                LogType::Error,
-            ),
-        }
-    }
-}
 
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();
-    init_thumbnail_dirs();
     let app = Router::new()
         .route("/", get(index))
         .route("/{video_id}", get(get_thumbnail))
@@ -258,11 +239,6 @@ fn validate_video_id(video_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_thumbnail_dir() {
-        assert_eq!(thumbnail_dir(), PathBuf::from("thumbnails"));
-    }
 
     #[test]
     fn test_thumbnail_path() {
