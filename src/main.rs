@@ -3,6 +3,7 @@ use crate::{
     quality::Quality,
     storage::{RedisPool, get_redis_object},
 };
+use anyhow::Result;
 use axum::{
     Extension, Router,
     body::{Body, Bytes},
@@ -79,7 +80,12 @@ async fn get_thumbnail(
 
     // If the image is already cached, return it
     let now = std::time::Instant::now();
-    let cached_data = fetch_from_cache(&state.bucket, &state.redis_pool, &video_id).await;
+    let cached_data = match fetch_from_cache(&state.bucket, &state.redis_pool, &video_id).await {
+        Ok(data) => data,
+        Err(_) => {
+            return fallback_response(500);
+        }
+    };
     log!(
         "CACHE READ: {video_id} - {}ms",
         LogType::Performance,
@@ -205,16 +211,22 @@ async fn fetch_from_cache(
     bucket: &s3::Bucket,
     redis_pool: &RedisPool,
     video_id: &str,
-) -> Option<(Vec<u8>, Quality)> {
-    let s3_id = get_redis_object(redis_pool, video_id).await;
+) -> Result<Option<(Vec<u8>, Quality)>> {
+    let s3_id = get_redis_object(redis_pool, video_id).await?;
     if let Some(s3_id) = s3_id {
+        let quality = match Quality::from_s3_key(&s3_id) {
+            Some(quality) => quality,
+            None => {
+                log!("ERROR: Invalid S3 key: {s3_id}", LogType::Error);
+                return Err(anyhow::anyhow!("Invalid S3 key: {s3_id}"));
+            }
+        };
         let data = storage::get_s3_object(bucket, &s3_id).await;
         if let Ok(data) = data {
-            let quality = Quality::from_s3_key(&s3_id).unwrap();
-            return Some((data.into_bytes().to_vec(), quality));
+            return Ok(Some((data.into_bytes().to_vec(), quality)));
         }
     }
-    None
+    Ok(None)
 }
 
 fn image_response(data: impl Into<Body>, quality: &Quality, cache_hit: bool) -> Response<Body> {
