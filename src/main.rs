@@ -1,4 +1,8 @@
-use crate::{log::LogType, quality::Quality, storage::get_redis_object};
+use crate::{
+    log::LogType,
+    quality::Quality,
+    storage::{RedisPool, get_redis_object},
+};
 use axum::{
     Extension, Router,
     body::{Body, Bytes},
@@ -20,15 +24,15 @@ mod storage;
 #[derive(Clone)]
 pub struct AppState {
     bucket: Arc<Mutex<Box<s3::Bucket>>>,
-    redis: Arc<Mutex<Box<redis::Client>>>,
+    redis_pool: Box<RedisPool>,
 }
 impl AppState {
     async fn new() -> Self {
         let bucket = storage::s3_connection().await;
-        let redis = storage::redis_client().await;
+        let redis_pool = storage::redis_pool().await;
         AppState {
             bucket: Arc::new(Mutex::new(bucket)),
-            redis: Arc::new(Mutex::new(redis)),
+            redis_pool,
         }
     }
 }
@@ -81,7 +85,7 @@ async fn get_thumbnail(
     // If the image is already cached, return it
     let now = std::time::Instant::now();
     let bucket = state.bucket.lock().await;
-    let cached_data = fetch_from_cache(&bucket, &state.redis, &video_id).await;
+    let cached_data = fetch_from_cache(&bucket, &state.redis_pool, &video_id).await;
     drop(bucket);
     log!(
         "CACHE READ: {video_id} - {}ms",
@@ -116,7 +120,14 @@ async fn get_thumbnail(
     let body = body.unwrap();
     let quality = quality.unwrap();
 
-    save_to_cache(state.bucket, state.redis, &video_id, &quality, body.clone()).await;
+    save_to_cache(
+        state.bucket,
+        &state.redis_pool,
+        &video_id,
+        &quality,
+        body.clone(),
+    )
+    .await;
 
     log!("NEW: {video_id} - {quality}", LogType::Info);
     image_response(body, &quality, false)
@@ -174,17 +185,17 @@ async fn fetch_thumbnail(video_id: &str, quality: &Quality) -> Result<Bytes, Sta
 
 async fn save_to_cache(
     bucket: Arc<Mutex<Box<s3::Bucket>>>,
-    redis: Arc<Mutex<Box<redis::Client>>>,
+    redis_pool: &RedisPool,
     video_id: &str,
     quality: &Quality,
     data: Bytes,
 ) {
     let key = s3_key(video_id, quality);
     let video_id = video_id.to_string();
+    let redis_pool = redis_pool.clone();
     tokio::spawn(async move {
         let bucket = bucket.lock().await;
-        let redis = redis.lock().await;
-        let result = storage::put_redis_object(&redis, video_id.as_str(), &key).await;
+        let result = storage::put_redis_object(&redis_pool, video_id.as_str(), &key).await;
         if let Err(e) = result {
             log!(
                 "ERROR: Error saving thumbnail to redis: {e}",
@@ -200,11 +211,10 @@ async fn save_to_cache(
 
 async fn fetch_from_cache(
     bucket: &s3::Bucket,
-    redis: &Arc<Mutex<Box<redis::Client>>>,
+    redis_pool: &RedisPool,
     video_id: &str,
 ) -> Option<(Vec<u8>, Quality)> {
-    let redis = redis.lock().await;
-    let s3_id = get_redis_object(&redis, video_id).await;
+    let s3_id = get_redis_object(redis_pool, video_id).await;
     if let Some(s3_id) = s3_id {
         let data = storage::get_s3_object(bucket, &s3_id).await;
         if let Ok(data) = data {

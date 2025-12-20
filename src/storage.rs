@@ -2,24 +2,31 @@ use redis::Commands;
 use s3::{creds::Credentials, request::ResponseData};
 use std::boxed::Box;
 
-pub async fn redis_client() -> Box<redis::Client> {
+pub type RedisPool = r2d2::Pool<redis::Client>;
+
+pub async fn redis_pool() -> Box<RedisPool> {
     let url = std::env::var("REDIS_URL").unwrap();
     let client = redis::Client::open(url).unwrap();
-    Box::new(client)
+
+    let pool = r2d2::Pool::builder()
+        .max_size(10)
+        .build(client)
+        .expect("Failed to create Redis connection pool");
+    Box::new(pool)
 }
 
 pub async fn put_redis_object(
-    client: &redis::Client,
+    pool: &RedisPool,
     key: &str,
     value: &str,
 ) -> Result<(), redis::RedisError> {
-    let mut client = client.get_connection().unwrap();
+    let mut client = pool.get().unwrap();
     client.set::<&str, &str, ()>(key, value).unwrap();
     Ok(())
 }
 
-pub async fn get_redis_object(client: &redis::Client, key: &str) -> Option<String> {
-    let mut client = client.get_connection().unwrap();
+pub async fn get_redis_object(pool: &RedisPool, key: &str) -> Option<String> {
+    let mut client = pool.get().unwrap();
     client.get::<&str, Option<String>>(key).unwrap()
 }
 
