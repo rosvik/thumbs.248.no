@@ -61,7 +61,6 @@ async fn main() {
     init_thumbnail_dirs();
     let app = Router::new()
         .route("/", get(index))
-        .route("/all", get(get_all_thumbnails))
         .route("/{video_id}", get(get_thumbnail))
         .layer(CorsLayer::new().allow_origin(Any));
 
@@ -76,31 +75,6 @@ async fn main() {
 
 async fn index() -> Html<&'static str> {
     Html(include_str!("../templates/index.html"))
-}
-
-async fn get_all_thumbnails() -> impl IntoResponse {
-    let thumbnail_dir = thumbnail_dir();
-    let mut thumbnails: Vec<PathBuf> = Vec::new();
-
-    for quality in SUPPORTED_QUALITIES {
-        let dir = std::fs::read_dir(thumbnail_dir.join(quality.path_name())).unwrap();
-        let files = dir.map(|entry| entry.unwrap().path()).collect::<Vec<_>>();
-        thumbnails.extend(files);
-    }
-
-    thumbnails
-        .iter()
-        .map(|path| {
-            path.file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .split(".")
-                .next()
-                .unwrap()
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
@@ -228,7 +202,7 @@ async fn fetch_from_cache(video_id: &str) -> Option<(Vec<u8>, Quality)> {
                     log!(
                         "ERROR: Error reading cached thumbnail: {}: {}",
                         LogType::Error,
-                        path.display(),
+                        path,
                         e,
                     );
                     return None;
