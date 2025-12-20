@@ -37,7 +37,7 @@ fn s3_region() -> s3::Region {
     }
 }
 
-pub async fn s3_connection() -> Box<s3::Bucket> {
+pub async fn s3_connection() -> s3::Bucket {
     let credentials = Credentials {
         access_key: Some(std::env::var("S3_ACCESS_KEY").unwrap()),
         secret_key: Some(std::env::var("S3_SECRET_KEY").unwrap()),
@@ -54,7 +54,7 @@ pub async fn s3_connection() -> Box<s3::Bucket> {
     if std::env::var("S3_PATH_STYLE").unwrap_or_default() == "true" {
         bucket.set_path_style();
     }
-    bucket
+    *bucket
 }
 
 pub async fn put_s3_object(

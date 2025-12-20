@@ -13,8 +13,6 @@ use axum::{
 };
 use regex::Regex;
 use reqwest::StatusCode;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 
 mod log;
@@ -23,17 +21,14 @@ mod storage;
 
 #[derive(Clone)]
 pub struct AppState {
-    bucket: Arc<Mutex<Box<s3::Bucket>>>,
+    bucket: s3::Bucket,
     redis_pool: Box<RedisPool>,
 }
 impl AppState {
     async fn new() -> Self {
         let bucket = storage::s3_connection().await;
         let redis_pool = storage::redis_pool().await;
-        AppState {
-            bucket: Arc::new(Mutex::new(bucket)),
-            redis_pool,
-        }
+        AppState { bucket, redis_pool }
     }
 }
 
@@ -84,9 +79,7 @@ async fn get_thumbnail(
 
     // If the image is already cached, return it
     let now = std::time::Instant::now();
-    let bucket = state.bucket.lock().await;
-    let cached_data = fetch_from_cache(&bucket, &state.redis_pool, &video_id).await;
-    drop(bucket);
+    let cached_data = fetch_from_cache(&state.bucket, &state.redis_pool, &video_id).await;
     log!(
         "CACHE READ: {video_id} - {}ms",
         LogType::Performance,
@@ -184,7 +177,7 @@ async fn fetch_thumbnail(video_id: &str, quality: &Quality) -> Result<Bytes, Sta
 }
 
 async fn save_to_cache(
-    bucket: Arc<Mutex<Box<s3::Bucket>>>,
+    bucket: s3::Bucket,
     redis_pool: &RedisPool,
     video_id: &str,
     quality: &Quality,
@@ -194,7 +187,6 @@ async fn save_to_cache(
     let video_id = video_id.to_string();
     let redis_pool = redis_pool.clone();
     tokio::spawn(async move {
-        let bucket = bucket.lock().await;
         let result = storage::put_redis_object(&redis_pool, video_id.as_str(), &key).await;
         if let Err(e) = result {
             log!(
