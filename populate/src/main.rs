@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -57,7 +58,21 @@ async fn main() {
             // Set Redis key
             {
                 let mut conn = redis_conn.lock().unwrap();
-                conn.set::<&str, String, ()>(yt_id, s3_key.clone()).unwrap();
+                match conn.set::<&str, String, ()>(yt_id, s3_key.clone()) {
+                    Ok(_) => (),
+                    Err(e) => {
+                        // Append output to file
+                        let mut file = std::fs::OpenOptions::new()
+                            .append(true)
+                            .open("error_redis.txt")
+                            .unwrap();
+                        file.write_all(
+                            format!("ERROR: Error setting Redis key for {yt_id}: {e}\n").as_bytes(),
+                        )
+                        .unwrap();
+                        println!("ERROR: Error setting Redis key for {yt_id}: {e}");
+                    }
+                };
             }
 
             // Upload to S3
