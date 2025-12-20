@@ -3,7 +3,7 @@ use crate::{
     quality::{FileExtension, Quality, Slug},
 };
 use axum::{
-    Router,
+    Extension, Router,
     body::{Body, Bytes},
     extract::Path,
     http::Response,
@@ -12,11 +12,26 @@ use axum::{
 };
 use regex::Regex;
 use reqwest::StatusCode;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 
 mod log;
 mod quality;
 mod storage;
+
+#[derive(Clone)]
+pub struct AppState {
+    bucket: Arc<Mutex<Box<s3::Bucket>>>,
+}
+impl AppState {
+    async fn new() -> Self {
+        let bucket = storage::get_connection().await;
+        AppState {
+            bucket: Arc::new(Mutex::new(bucket)),
+        }
+    }
+}
 
 /// Supported qualities for thumbnails, in order of preference
 const SUPPORTED_QUALITIES: [Quality; 6] = [
@@ -43,6 +58,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(index))
         .route("/{video_id}", get(get_thumbnail))
+        .layer(Extension(AppState::new().await))
         .layer(CorsLayer::new().allow_origin(Any));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:2342").await.unwrap();
@@ -58,14 +74,19 @@ async fn index() -> Html<&'static str> {
     Html(include_str!("../templates/index.html"))
 }
 
-async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
+async fn get_thumbnail(
+    Path(video_id): Path<String>,
+    Extension(state): Extension<AppState>,
+) -> impl IntoResponse {
     if !validate_video_id(&video_id) {
         log!("NOT FOUND: Invalid video ID: {video_id}", LogType::Warning);
         return fallback_response(400);
     }
 
     // If the image is already cached, return it
-    let cached_data = fetch_from_cache(&video_id).await;
+    let bucket = state.bucket.lock().await;
+    let cached_data = fetch_from_cache(&bucket, &video_id).await;
+    drop(bucket);
     if let Some((data, quality)) = cached_data {
         log!("CACHE: {video_id} - {quality}", LogType::Debug);
         return image_response(data, &quality, true);
@@ -94,7 +115,7 @@ async fn get_thumbnail(Path(video_id): Path<String>) -> impl IntoResponse {
     let body = body.unwrap();
     let quality = quality.unwrap();
 
-    save_to_cache(&video_id, &quality, body.clone()).await;
+    save_to_cache(state.bucket, &video_id, &quality, body.clone()).await;
 
     log!("NEW: {video_id} - {quality}", LogType::Info);
     image_response(body, &quality, false)
@@ -150,10 +171,15 @@ async fn fetch_thumbnail(video_id: &str, quality: &Quality) -> Result<Bytes, Sta
     }
 }
 
-async fn save_to_cache(video_id: &str, quality: &Quality, data: Bytes) {
+async fn save_to_cache(
+    bucket: Arc<Mutex<Box<s3::Bucket>>>,
+    video_id: &str,
+    quality: &Quality,
+    data: Bytes,
+) {
     let key = s3_key(video_id, quality);
-    let bucket = storage::get_connection().await;
     tokio::spawn(async move {
+        let bucket = bucket.lock().await;
         let result = storage::put_object(&bucket, &key, data.as_ref()).await;
         if let Err(e) = result {
             log!(
@@ -164,12 +190,11 @@ async fn save_to_cache(video_id: &str, quality: &Quality, data: Bytes) {
     });
 }
 
-async fn fetch_from_cache(video_id: &str) -> Option<(Vec<u8>, Quality)> {
-    let bucket = storage::get_connection().await;
+async fn fetch_from_cache(bucket: &s3::Bucket, video_id: &str) -> Option<(Vec<u8>, Quality)> {
     for quality in SUPPORTED_QUALITIES {
         let key = s3_key(video_id, &quality);
         let now = std::time::Instant::now();
-        if let Ok(data) = storage::get_object(&bucket, &key).await {
+        if let Ok(data) = storage::get_object(bucket, &key).await {
             log!(
                 "CACHE LOOKUP: {video_id} - {quality} - {}ms",
                 LogType::Performance,
