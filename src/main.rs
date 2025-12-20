@@ -12,11 +12,11 @@ use axum::{
 };
 use regex::Regex;
 use reqwest::StatusCode;
-use tokio::{fs::File, io::AsyncWriteExt};
 use tower_http::cors::{Any, CorsLayer};
 
 mod log;
 mod quality;
+mod storage;
 
 /// Supported qualities for thumbnails, in order of preference
 const SUPPORTED_QUALITIES: [Quality; 6] = [
@@ -152,49 +152,35 @@ async fn fetch_thumbnail(video_id: &str, quality: &Quality) -> Result<Bytes, Sta
 
 async fn save_to_cache(video_id: &str, quality: &Quality, data: Bytes) {
     let key = s3_key(video_id, quality);
+    let bucket = storage::get_connection().await;
     tokio::spawn(async move {
-        let file = File::create(key).await;
-        if let Err(e) = file {
-            log!("ERROR: Error creating thumbnail file: {e}", LogType::Error);
-            return;
-        }
-        if let Ok(mut file) = file {
-            let result = file.write_all(&data).await;
-            if let Err(e) = result {
-                log!("ERROR: Error writing thumbnail file: {e}", LogType::Error);
-            }
+        let result = storage::put_object(&bucket, &key, data.as_ref()).await;
+        if let Err(e) = result {
+            log!(
+                "ERROR: Error saving thumbnail to cache: {e}",
+                LogType::Error
+            );
         }
     });
 }
 
 async fn fetch_from_cache(video_id: &str) -> Option<(Vec<u8>, Quality)> {
+    let bucket = storage::get_connection().await;
     for quality in SUPPORTED_QUALITIES {
-        let path = s3_key(video_id, &quality);
+        let key = s3_key(video_id, &quality);
         let now = std::time::Instant::now();
-        if std::fs::metadata(&path).is_ok() {
+        if let Ok(data) = storage::get_object(&bucket, &key).await {
             log!(
                 "CACHE LOOKUP: {video_id} - {quality} - {}ms",
                 LogType::Performance,
                 now.elapsed().as_millis(),
             );
-            let data = match std::fs::read(&path) {
-                Ok(data) => data,
-                Err(e) => {
-                    log!(
-                        "ERROR: Error reading cached thumbnail: {}: {}",
-                        LogType::Error,
-                        path,
-                        e,
-                    );
-                    return None;
-                }
-            };
             log!(
                 "CACHE READ: {video_id} - {quality} - {}ms",
                 LogType::Performance,
                 now.elapsed().as_millis(),
             );
-            return Some((data, quality));
+            return Some((data.into_bytes().to_vec(), quality));
         }
     }
     None
