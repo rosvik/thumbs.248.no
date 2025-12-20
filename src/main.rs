@@ -1,7 +1,4 @@
-use crate::{
-    log::LogType,
-    quality::{FileExtension, Quality, Slug},
-};
+use crate::{log::LogType, quality::Quality};
 use axum::{
     Extension, Router,
     body::{Body, Bytes},
