@@ -6,14 +6,15 @@ use s3::creds::Credentials;
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();
+    let thumbnails_dir = std::env::var("THUMBNAILS_DIR").unwrap();
     // List all files in ./thumbnails
     let dirs = vec![
-        PathBuf::from("../thumbnails/sddefault/jpg"),
-        PathBuf::from("../thumbnails/sddefault/webp"),
-        PathBuf::from("../thumbnails/hqdefault/jpg"),
-        PathBuf::from("../thumbnails/hqdefault/webp"),
-        PathBuf::from("../thumbnails/maxresdefault/jpg"),
-        PathBuf::from("../thumbnails/maxresdefault/webp"),
+        PathBuf::from(format!("{}/sddefault/jpg", thumbnails_dir)),
+        PathBuf::from(format!("{}/sddefault/webp", thumbnails_dir)),
+        PathBuf::from(format!("{}/hqdefault/jpg", thumbnails_dir)),
+        PathBuf::from(format!("{}/hqdefault/webp", thumbnails_dir)),
+        PathBuf::from(format!("{}/maxresdefault/jpg", thumbnails_dir)),
+        PathBuf::from(format!("{}/maxresdefault/webp", thumbnails_dir)),
     ];
 
     let redis_client = redis::Client::open(std::env::var("REDIS_URL").unwrap()).unwrap();
