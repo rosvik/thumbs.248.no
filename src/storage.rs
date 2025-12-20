@@ -1,7 +1,7 @@
 use s3::{creds::Credentials, request::ResponseData};
 use std::boxed::Box;
 
-fn get_region() -> s3::Region {
+fn region() -> s3::Region {
     s3::Region::Custom {
         region: std::env::var("S3_REGION").unwrap(),
         endpoint: std::env::var("S3_ENDPOINT").unwrap(),
@@ -16,12 +16,7 @@ pub async fn get_connection() -> Box<s3::Bucket> {
         security_token: None,
         session_token: None,
     };
-    s3::Bucket::new(
-        &std::env::var("S3_BUCKET").unwrap(),
-        get_region(),
-        credentials,
-    )
-    .unwrap()
+    s3::Bucket::new(&std::env::var("S3_BUCKET").unwrap(), region(), credentials).unwrap()
 }
 
 pub async fn put_object(
@@ -37,8 +32,7 @@ pub async fn get_object(
     bucket: &s3::Bucket,
     key: &str,
 ) -> Result<ResponseData, s3::error::S3Error> {
-    let result = bucket.get_object(key).await?;
-    Ok(result)
+    bucket.get_object(key).await
 }
 
 // #[cfg(test)]
