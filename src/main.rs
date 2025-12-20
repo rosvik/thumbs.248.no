@@ -41,12 +41,7 @@ const SUPPORTED_QUALITIES: [Quality; 6] = [
 ];
 
 fn s3_key(video_id: &str, quality: &Quality) -> String {
-    let prefix = video_id.split_at(2).0;
-    format!(
-        "{prefix}.{}.{video_id}.{}",
-        quality.slug(),
-        quality.file_extension()
-    )
+    format!("{video_id}.{}.{}", quality.slug(), quality.file_extension())
 }
 
 #[tokio::main]
@@ -257,27 +252,27 @@ mod tests {
     fn test_thumbnail_path() {
         assert_eq!(
             s3_key("aGb3AlQrN9E", &Quality::WebpMaxres),
-            "aG.maxresdefault.aGb3AlQrN9E.webp".to_string()
+            "aGb3AlQrN9E.maxresdefault.webp".to_string()
         );
         assert_eq!(
             s3_key("aGb3AlQrN9E", &Quality::JpgMaxres),
-            "aG.maxresdefault.aGb3AlQrN9E.jpg".to_string()
+            "aGb3AlQrN9E.maxresdefault.jpg".to_string()
         );
         assert_eq!(
             s3_key("aGb3AlQrN9E", &Quality::WebpSd),
-            "aG.sddefault.aGb3AlQrN9E.webp".to_string()
+            "aGb3AlQrN9E.sddefault.webp".to_string()
         );
         assert_eq!(
             s3_key("aGb3AlQrN9E", &Quality::JpgSd),
-            "aG.sddefault.aGb3AlQrN9E.jpg".to_string()
+            "aGb3AlQrN9E.sddefault.jpg".to_string()
         );
         assert_eq!(
             s3_key("aGb3AlQrN9E", &Quality::WebpHq),
-            "aG.hqdefault.aGb3AlQrN9E.webp".to_string()
+            "aGb3AlQrN9E.hqdefault.webp".to_string()
         );
         assert_eq!(
             s3_key("aGb3AlQrN9E", &Quality::JpgHq),
-            "aG.hqdefault.aGb3AlQrN9E.jpg".to_string()
+            "aGb3AlQrN9E.hqdefault.jpg".to_string()
         );
     }
 }
