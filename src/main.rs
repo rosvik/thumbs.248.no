@@ -207,6 +207,11 @@ async fn fetch_from_cache(bucket: &s3::Bucket, video_id: &str) -> Option<(Vec<u8
             );
             return Some((data.into_bytes().to_vec(), quality));
         }
+        log!(
+            "CACHE MISS: {video_id} - {quality} - {}ms",
+            LogType::Performance,
+            now.elapsed().as_millis(),
+        );
     }
     None
 }
