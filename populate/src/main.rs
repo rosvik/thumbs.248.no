@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
+use futures::stream::{self, StreamExt};
 use redis::Commands;
 use s3::creds::Credentials;
 
@@ -18,29 +20,61 @@ async fn main() {
     ];
 
     let redis_client = redis::Client::open(std::env::var("REDIS_URL").unwrap()).unwrap();
-    let mut redis_conn = redis_client.get_connection().unwrap();
+    let redis_conn = Arc::new(Mutex::new(redis_client.get_connection().unwrap()));
 
-    let bucket = s3_connection();
+    let bucket = Arc::new(s3_connection());
 
+    // Collect all file paths first
+    let mut all_files = Vec::new();
     for dir in dirs {
+        println!("Collecting thumbnails from {}", dir.display());
         let files = std::fs::read_dir(dir).unwrap();
         for file in files {
-            let now = std::time::Instant::now();
             let file = file.unwrap();
-            let path = file.path();
+            all_files.push(file.path());
+        }
+    }
+
+    println!(
+        "Processing {} files in parallel (10 at a time)",
+        all_files.len()
+    );
+
+    // Process files in parallel with a concurrency limit of 10
+    let futures = all_files.into_iter().map(|path| {
+        let redis_conn = Arc::clone(&redis_conn);
+        let bucket = Arc::clone(&bucket);
+
+        async move {
+            let now = std::time::Instant::now();
             let file_name = path.file_name().unwrap().to_str().unwrap();
             let yt_id = file_name.split('.').next().unwrap();
             let s3_key = s3_key(&path);
-            redis_conn
-                .set::<&str, String, ()>(yt_id, s3_key.clone())
-                .unwrap();
+
+            // Read file content
+            let file_content = std::fs::read(&path).unwrap();
+
+            // Set Redis key
+            {
+                let mut conn = redis_conn.lock().unwrap();
+                conn.set::<&str, String, ()>(yt_id, s3_key.clone()).unwrap();
+            }
+
+            // Upload to S3
             bucket
-                .put_object(&s3_key, std::fs::read(file.path()).unwrap().as_slice())
+                .put_object(&s3_key, file_content.as_slice())
                 .await
                 .unwrap();
+
             println!("Uploaded {} to S3 in {:?}", s3_key, now.elapsed());
         }
-    }
+    });
+
+    // Process with concurrency limit of 10
+    stream::iter(futures)
+        .buffer_unordered(10)
+        .collect::<Vec<_>>()
+        .await;
 }
 
 fn s3_key(path: &Path) -> String {
