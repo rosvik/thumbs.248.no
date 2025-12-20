@@ -25,6 +25,30 @@ impl Quality {
             Quality::WebpHq | Quality::JpgHq => "hqdefault",
         }
     }
+
+    pub fn from_s3_key(key: &str) -> Option<Quality> {
+        let parts = key.split('.').collect::<Vec<&str>>();
+        if parts.len() != 3 {
+            return None;
+        }
+        let slug = parts[1];
+        let file_extension = parts[2];
+        match file_extension {
+            "webp" => match slug {
+                "maxresdefault" => Some(Quality::WebpMaxres),
+                "sddefault" => Some(Quality::WebpSd),
+                "hqdefault" => Some(Quality::WebpHq),
+                _ => None,
+            },
+            "jpg" => match slug {
+                "maxresdefault" => Some(Quality::JpgMaxres),
+                "sddefault" => Some(Quality::JpgSd),
+                "hqdefault" => Some(Quality::JpgHq),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for Quality {
