@@ -35,10 +35,13 @@ fn thumbnail_dir() -> PathBuf {
         .unwrap_or(DEFAULT_THUMBNAIL_DIR.to_string())
         .into()
 }
-fn thumbnail_path(video_id: &str, quality: &Quality) -> PathBuf {
-    thumbnail_dir()
-        .join(quality.path_name())
-        .join(format!("{video_id}.{}", quality.file_extension()))
+fn s3_key(video_id: &str, quality: &Quality) -> String {
+    let prefix = video_id.split_at(2).0;
+    format!(
+        "{prefix}.{}.{video_id}.{}",
+        quality.slug(),
+        quality.file_extension()
+    )
 }
 fn init_thumbnail_dirs() {
     for quality in SUPPORTED_QUALITIES {
@@ -193,9 +196,9 @@ async fn fetch_thumbnail(video_id: &str, quality: &Quality) -> Result<Bytes, Sta
 }
 
 async fn save_to_cache(video_id: &str, quality: &Quality, data: Bytes) {
-    let path = thumbnail_path(video_id, quality);
+    let key = s3_key(video_id, quality);
     tokio::spawn(async move {
-        let file = File::create(path).await;
+        let file = File::create(key).await;
         if let Err(e) = file {
             log!("ERROR: Error creating thumbnail file: {e}", LogType::Error);
             return;
@@ -211,7 +214,7 @@ async fn save_to_cache(video_id: &str, quality: &Quality, data: Bytes) {
 
 async fn fetch_from_cache(video_id: &str) -> Option<(Vec<u8>, Quality)> {
     for quality in SUPPORTED_QUALITIES {
-        let path = thumbnail_path(video_id, &quality);
+        let path = s3_key(video_id, &quality);
         let now = std::time::Instant::now();
         if std::fs::metadata(&path).is_ok() {
             log!(
@@ -290,28 +293,28 @@ mod tests {
     #[test]
     fn test_thumbnail_path() {
         assert_eq!(
-            thumbnail_path("aGb3AlQrN9E", &Quality::WebpMaxres),
-            PathBuf::from("thumbnails/maxresdefault/webp/aGb3AlQrN9E.webp")
+            s3_key("aGb3AlQrN9E", &Quality::WebpMaxres),
+            "aG.maxresdefault.aGb3AlQrN9E.webp".to_string()
         );
         assert_eq!(
-            thumbnail_path("aGb3AlQrN9E", &Quality::JpgMaxres),
-            PathBuf::from("thumbnails/maxresdefault/jpg/aGb3AlQrN9E.jpg")
+            s3_key("aGb3AlQrN9E", &Quality::JpgMaxres),
+            "aG.maxresdefault.aGb3AlQrN9E.jpg".to_string()
         );
         assert_eq!(
-            thumbnail_path("aGb3AlQrN9E", &Quality::WebpSd),
-            PathBuf::from("thumbnails/sddefault/webp/aGb3AlQrN9E.webp")
+            s3_key("aGb3AlQrN9E", &Quality::WebpSd),
+            "aG.sddefault.aGb3AlQrN9E.webp".to_string()
         );
         assert_eq!(
-            thumbnail_path("aGb3AlQrN9E", &Quality::JpgSd),
-            PathBuf::from("thumbnails/sddefault/jpg/aGb3AlQrN9E.jpg")
+            s3_key("aGb3AlQrN9E", &Quality::JpgSd),
+            "aG.sddefault.aGb3AlQrN9E.jpg".to_string()
         );
         assert_eq!(
-            thumbnail_path("aGb3AlQrN9E", &Quality::WebpHq),
-            PathBuf::from("thumbnails/hqdefault/webp/aGb3AlQrN9E.webp")
+            s3_key("aGb3AlQrN9E", &Quality::WebpHq),
+            "aG.hqdefault.aGb3AlQrN9E.webp".to_string()
         );
         assert_eq!(
-            thumbnail_path("aGb3AlQrN9E", &Quality::JpgHq),
-            PathBuf::from("thumbnails/hqdefault/jpg/aGb3AlQrN9E.jpg")
+            s3_key("aGb3AlQrN9E", &Quality::JpgHq),
+            "aG.hqdefault.aGb3AlQrN9E.jpg".to_string()
         );
     }
 }
