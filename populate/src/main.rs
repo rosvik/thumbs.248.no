@@ -54,34 +54,54 @@ async fn main() {
 
             // Read file content
             let file_content = std::fs::read(&path).unwrap();
+            let mut exists = false;
 
             // Set Redis key
             {
                 let mut conn = redis_conn.lock().unwrap();
-                match conn.set::<&str, String, ()>(yt_id, s3_key.clone()) {
+                // Skip if Redis key already exists
+                if conn.exists(yt_id).unwrap_or(0) > 0 {
+                    exists = true;
+                    println!("Skipping {yt_id} because it already exists in Redis");
+                } else {
+                    match conn.set::<&str, String, ()>(yt_id, s3_key.clone()) {
+                        Ok(_) => (),
+                        Err(e) => {
+                            // Append output to file
+                            let mut file = std::fs::OpenOptions::new()
+                                .append(true)
+                                .open("error_redis.txt")
+                                .unwrap();
+                            file.write_all(
+                                format!("ERROR: Error setting Redis key for {yt_id}: {e}\n")
+                                    .as_bytes(),
+                            )
+                            .unwrap_or_default();
+                            println!("ERROR: Error setting Redis key for {yt_id}: {e}");
+                        }
+                    };
+                }
+            }
+            // Upload to S3
+            if !exists {
+                match bucket.put_object(&s3_key, file_content.as_slice()).await {
                     Ok(_) => (),
                     Err(e) => {
                         // Append output to file
                         let mut file = std::fs::OpenOptions::new()
                             .append(true)
-                            .open("error_redis.txt")
+                            .open("error_s3.txt")
                             .unwrap();
                         file.write_all(
-                            format!("ERROR: Error setting Redis key for {yt_id}: {e}\n").as_bytes(),
+                            format!("ERROR: Error uploading to S3 for {yt_id}: {e}\n").as_bytes(),
                         )
-                        .unwrap();
-                        println!("ERROR: Error setting Redis key for {yt_id}: {e}");
+                        .unwrap_or_default();
+                        println!("ERROR: Error uploading to S3 for {yt_id}: {e}");
                     }
                 };
+
+                println!("Uploaded {} to S3 in {:?}", s3_key, now.elapsed());
             }
-
-            // Upload to S3
-            bucket
-                .put_object(&s3_key, file_content.as_slice())
-                .await
-                .unwrap();
-
-            println!("Uploaded {} to S3 in {:?}", s3_key, now.elapsed());
         }
     });
 
