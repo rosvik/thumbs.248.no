@@ -1,0 +1,24 @@
+[[containers]]
+name = "thumbs-minio"
+image = "quay.io/minio/minio"
+network = "thumbs"
+ports = [
+  "9000:9000",
+  "9001:9001",
+]
+env = [
+  "MINIO_ROOT_USER=admin",
+  "MINIO_ROOT_PASSWORD=password123",
+  "MINIO_ACCESS_KEY=accesskey",
+  "MINIO_SECRET_KEY=secretkey"
+]
+volumes = ["thumbs-minio:/data"]
+cmd = ["server","--console-address",":9001","/data"]
+
+[[containers]]
+name = "thumbs-redis"
+image = "redis:latest"
+network = "thumbs"
+ports = ["6380:6379"]
+volumes = ["thumbs-redis:/data"]
+cmd = ["redis-server", "--save", "60", "1"]
