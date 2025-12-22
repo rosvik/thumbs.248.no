@@ -1,3 +1,4 @@
+#[derive(PartialEq)]
 pub enum LogType {
     Debug,
     Info,
@@ -26,6 +27,9 @@ macro_rules! log {
             LogType::Warning | LogType::Error => &mut std::io::stderr(),
         };
 
-        let _ = writeln!(out, "{color}[{timestamp}] {}\x1b[0m", format!($fmt $(, $args)*));
+        // Only print performance logs if DEBUG is set to true
+        if $log_type != LogType::Performance || std::env::var("DEBUG").unwrap_or_default() == "true"{
+            let _ = writeln!(out, "{color}[{timestamp}] {}\x1b[0m", format!($fmt $(, $args)*));
+        }
     }};
 }
