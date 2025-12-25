@@ -19,6 +19,6 @@ cmd = ["server","--console-address",":9001","/data"]
 name = "thumbs-redis"
 image = "redis:latest"
 network = "thumbs"
-ports = ["6380:6379"]
+ports = ["6379:6379"]
 volumes = ["thumbs-redis:/data"]
 cmd = ["redis-server", "--save", "60", "1"]
