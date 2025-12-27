@@ -52,6 +52,7 @@ async fn main() {
     dotenv::dotenv().ok();
     let app = Router::new()
         .route("/", get(index))
+        .route("/list", get(list_ids))
         .route("/{video_id}", get(get_thumbnail))
         .layer(Extension(AppState::new().await))
         .layer(CorsLayer::new().allow_origin(Any));
@@ -67,6 +68,19 @@ async fn main() {
 
 async fn index() -> Html<&'static str> {
     Html(include_str!("../templates/index.html"))
+}
+
+async fn list_ids(Extension(state): Extension<AppState>) -> impl IntoResponse {
+    let keys = storage::list_redis_keys(&state.redis_pool).await;
+    if let Err(e) = keys {
+        log!("ERROR: Error listing thumbnails: {e}", LogType::Error);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Error listing thumbnails".to_string(),
+        );
+    }
+    let ids = keys.unwrap();
+    (StatusCode::OK, ids.join("\n"))
 }
 
 async fn get_thumbnail(

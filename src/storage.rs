@@ -27,6 +27,12 @@ pub async fn get_redis_object(pool: &RedisPool, key: &str) -> Result<Option<Stri
     Ok(result)
 }
 
+pub async fn list_redis_keys(pool: &RedisPool) -> Result<Vec<String>> {
+    let mut client = pool.get()?;
+    let result = client.keys::<&str, Vec<String>>("*")?;
+    Ok(result)
+}
+
 fn s3_region() -> s3::Region {
     s3::Region::Custom {
         region: std::env::var("S3_REGION").expect("S3_REGION is not set"),
