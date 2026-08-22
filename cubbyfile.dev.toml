@@ -10,7 +10,8 @@ env = [
   "MINIO_ROOT_USER=admin",
   "MINIO_ROOT_PASSWORD=password123",
   "MINIO_ACCESS_KEY=accesskey",
-  "MINIO_SECRET_KEY=secretkey"
+  "MINIO_SECRET_KEY=secretkey",
+  "MINIO_BUCKET=thumbs"
 ]
 volumes = ["thumbs-minio:/data"]
 cmd = ["server","--console-address",":9001","/data"]
