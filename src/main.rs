@@ -15,6 +15,7 @@ use axum::{
 use regex::Regex;
 use reqwest::StatusCode;
 use tower_http::cors::{Any, CorsLayer};
+use uuid::Uuid;
 
 mod log;
 mod quality;
@@ -24,12 +25,17 @@ mod storage;
 pub struct AppState {
     bucket: s3::Bucket,
     redis_pool: Box<RedisPool>,
+    admin_token: Uuid,
 }
 impl AppState {
     async fn new() -> Self {
         let bucket = storage::s3_connection().await;
         let redis_pool = storage::redis_pool().await;
-        AppState { bucket, redis_pool }
+        AppState {
+            bucket,
+            redis_pool,
+            admin_token: Uuid::new_v4(),
+        }
     }
 }
 
@@ -50,11 +56,14 @@ fn s3_key(video_id: &str, quality: &Quality) -> String {
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();
+    let state = AppState::new().await;
+    log!("Admin token: {}", LogType::Info, state.admin_token);
     let app = Router::new()
         .route("/", get(index))
         .route("/list", get(list_ids))
+        .route("/admin/{token}", get(admin))
         .route("/{video_id}", get(get_thumbnail))
-        .layer(Extension(AppState::new().await))
+        .layer(Extension(state))
         .layer(CorsLayer::new().allow_origin(Any));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:2342").await.unwrap();
@@ -81,6 +90,17 @@ async fn list_ids(Extension(state): Extension<AppState>) -> impl IntoResponse {
     }
     let ids = keys.unwrap();
     (StatusCode::OK, ids.join("\n"))
+}
+
+async fn admin(
+    Path(token): Path<String>,
+    Extension(state): Extension<AppState>,
+) -> impl IntoResponse {
+    if Uuid::parse_str(&token).ok() != Some(state.admin_token) {
+        log!("UNAUTHORIZED: Invalid admin token", LogType::Warning);
+        return (StatusCode::UNAUTHORIZED, "Not found");
+    }
+    (StatusCode::OK, "hello admin!")
 }
 
 async fn get_thumbnail(
