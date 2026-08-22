@@ -226,7 +226,13 @@ async fn fetch_from_cache(
     redis_pool: &RedisPool,
     video_id: &str,
 ) -> Result<Option<(Vec<u8>, Quality)>> {
+    let now = std::time::Instant::now();
     let s3_id = get_redis_object(redis_pool, video_id).await?;
+    log!(
+        "CACHE READ: Redis - {video_id} - {}ms",
+        LogType::Performance,
+        now.elapsed().as_millis(),
+    );
     if let Some(s3_id) = s3_id {
         let quality = match Quality::from_s3_key(&s3_id) {
             Some(quality) => quality,
@@ -235,7 +241,13 @@ async fn fetch_from_cache(
                 return Err(anyhow::anyhow!("Invalid S3 key: {s3_id}"));
             }
         };
+        let now = std::time::Instant::now();
         let data = storage::get_s3_object(bucket, &s3_id).await;
+        log!(
+            "CACHE READ: S3 - {video_id} - {}ms",
+            LogType::Performance,
+            now.elapsed().as_millis(),
+        );
         if let Ok(data) = data {
             return Ok(Some((data.into_bytes().to_vec(), quality)));
         }
