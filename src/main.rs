@@ -48,8 +48,9 @@ impl AppState {
     }
 
     /// Broadcast to connected admin pages
-    fn announce_load(&self, video_id: &str) {
-        let _ = self.loaded.send(video_id.to_string());
+    fn announce_load(&self, video_id: &str, cache_hit: bool) {
+        let flag = if cache_hit { "CACHE" } else { "NEW" };
+        let _ = self.loaded.send(format!("{flag} {video_id}"));
     }
 }
 
@@ -237,7 +238,7 @@ async fn get_thumbnail(
     );
     if let Some((data, quality)) = cached_data {
         log!("CACHE: {video_id} - {quality}", LogType::Debug);
-        state.announce_load(&video_id);
+        state.announce_load(&video_id, true);
         return image_response(data, &quality, true);
     }
 
@@ -264,7 +265,7 @@ async fn get_thumbnail(
     let body = body.unwrap();
     let quality = quality.unwrap();
 
-    state.announce_load(&video_id);
+    state.announce_load(&video_id, false);
     save_to_cache(
         state.bucket,
         &state.redis_pool,
