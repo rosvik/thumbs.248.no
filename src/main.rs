@@ -10,10 +10,12 @@ use axum::{
     extract::Path,
     http::Response,
     response::{Html, IntoResponse},
-    routing::get,
+    routing::{delete, get},
 };
 use regex::Regex;
 use reqwest::StatusCode;
+use std::{collections::VecDeque, sync::Arc};
+use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 use uuid::Uuid;
 
@@ -26,6 +28,7 @@ pub struct AppState {
     bucket: s3::Bucket,
     redis_pool: Box<RedisPool>,
     admin_token: Uuid,
+    recent: Arc<RwLock<VecDeque<String>>>,
 }
 impl AppState {
     async fn new() -> Self {
@@ -35,9 +38,20 @@ impl AppState {
             bucket,
             redis_pool,
             admin_token: Uuid::new_v4(),
+            recent: Arc::new(RwLock::new(VecDeque::new())),
         }
     }
+
+    async fn record_recent(&self, video_id: &str) {
+        let mut recent = self.recent.write().await;
+        recent.retain(|id| id != video_id);
+        recent.push_front(video_id.to_string());
+        recent.truncate(RECENT_COUNT);
+    }
 }
+
+/// Number of recently loaded video IDs kept for the admin page
+const RECENT_COUNT: usize = 1000;
 
 /// Supported qualities for thumbnails, in order of preference
 const SUPPORTED_QUALITIES: [Quality; 6] = [
@@ -57,21 +71,21 @@ fn s3_key(video_id: &str, quality: &Quality) -> String {
 async fn main() {
     dotenv::dotenv().ok();
     let state = AppState::new().await;
-    log!("Admin token: {}", LogType::Info, state.admin_token);
+    let token = state.admin_token;
     let app = Router::new()
         .route("/", get(index))
         .route("/list", get(list_ids))
-        .route("/admin/{token}", get(admin))
+        .route("/admin/{token}", get(admin_page))
+        .route("/admin/{token}/thumbnails", get(list_recents))
+        .route("/admin/{token}/thumbnail/{video_id}", delete(admin_delete))
         .route("/{video_id}", get(get_thumbnail))
         .layer(Extension(state))
         .layer(CorsLayer::new().allow_origin(Any));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:2342").await.unwrap();
-    log!(
-        "Listening on http://{}",
-        LogType::Debug,
-        listener.local_addr().unwrap(),
-    );
+    let addr = listener.local_addr().unwrap();
+    log!("Listening on http://{addr}", LogType::Debug);
+    log!("Admin page: http://{addr}/admin/{token}", LogType::Info);
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -92,15 +106,85 @@ async fn list_ids(Extension(state): Extension<AppState>) -> impl IntoResponse {
     (StatusCode::OK, ids.join("\n"))
 }
 
-async fn admin(
+fn is_admin(token: &str, state: &AppState) -> bool {
+    Uuid::parse_str(token).ok() == Some(state.admin_token)
+}
+
+async fn admin_page(
     Path(token): Path<String>,
     Extension(state): Extension<AppState>,
 ) -> impl IntoResponse {
-    if Uuid::parse_str(&token).ok() != Some(state.admin_token) {
+    if !is_admin(&token, &state) {
+        log!("UNAUTHORIZED: Invalid admin token", LogType::Warning);
+        return (StatusCode::UNAUTHORIZED, Html("Not found")).into_response();
+    }
+    Html(include_str!("../templates/admin.html")).into_response()
+}
+
+async fn list_recents(
+    Path(token): Path<String>,
+    Extension(state): Extension<AppState>,
+) -> impl IntoResponse {
+    if !is_admin(&token, &state) {
+        log!("UNAUTHORIZED: Invalid admin token", LogType::Warning);
+        return (StatusCode::UNAUTHORIZED, "Not found".to_string());
+    }
+    let recent = state.recent.read().await;
+    let ids = recent.iter().cloned().collect::<Vec<String>>();
+    (StatusCode::OK, ids.join("\n"))
+}
+
+async fn admin_delete(
+    Path((token, video_id)): Path<(String, String)>,
+    Extension(state): Extension<AppState>,
+) -> impl IntoResponse {
+    if !is_admin(&token, &state) {
         log!("UNAUTHORIZED: Invalid admin token", LogType::Warning);
         return (StatusCode::UNAUTHORIZED, "Not found");
     }
-    (StatusCode::OK, "hello admin!")
+    if !validate_video_id(&video_id) {
+        log!(
+            "BAD REQUEST: Invalid video ID: {video_id}",
+            LogType::Warning
+        );
+        return (StatusCode::BAD_REQUEST, "Invalid video ID");
+    }
+
+    let s3_key = match get_redis_object(&state.redis_pool, &video_id).await {
+        Ok(Some(key)) => key,
+        Ok(None) => return (StatusCode::NOT_FOUND, "Thumbnail not found"),
+        Err(e) => {
+            log!("ERROR: Error looking up {video_id}: {e}", LogType::Error);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Error deleting thumbnail",
+            );
+        }
+    };
+
+    if let Err(e) = storage::delete_s3_object(&state.bucket, &s3_key).await {
+        log!(
+            "ERROR: Error deleting {s3_key} from s3: {e}",
+            LogType::Error
+        );
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Error deleting thumbnail",
+        );
+    }
+    if let Err(e) = storage::delete_redis_object(&state.redis_pool, &video_id).await {
+        log!(
+            "ERROR: Error deleting {video_id} from redis: {e}",
+            LogType::Error
+        );
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Error deleting thumbnail",
+        );
+    }
+
+    log!("DELETE: {video_id} - {s3_key}", LogType::Info);
+    (StatusCode::NO_CONTENT, "")
 }
 
 async fn get_thumbnail(
@@ -127,6 +211,7 @@ async fn get_thumbnail(
     );
     if let Some((data, quality)) = cached_data {
         log!("CACHE: {video_id} - {quality}", LogType::Debug);
+        state.record_recent(&video_id).await;
         return image_response(data, &quality, true);
     }
 
@@ -153,6 +238,7 @@ async fn get_thumbnail(
     let body = body.unwrap();
     let quality = quality.unwrap();
 
+    state.record_recent(&video_id).await;
     save_to_cache(
         state.bucket,
         &state.redis_pool,
