@@ -17,7 +17,6 @@ use reqwest::StatusCode;
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
-use uuid::Uuid;
 
 mod log;
 mod quality;
@@ -27,17 +26,20 @@ mod storage;
 pub struct AppState {
     bucket: s3::Bucket,
     redis_pool: Box<RedisPool>,
-    admin_token: Uuid,
+    admin_token: Option<String>,
     recent: Arc<RwLock<VecDeque<String>>>,
 }
 impl AppState {
     async fn new() -> Self {
         let bucket = storage::s3_connection().await;
         let redis_pool = storage::redis_pool().await;
+        let admin_token = std::env::var("ADMIN_TOKEN")
+            .ok()
+            .filter(|token| !token.is_empty());
         AppState {
             bucket,
             redis_pool,
-            admin_token: Uuid::new_v4(),
+            admin_token,
             recent: Arc::new(RwLock::new(VecDeque::new())),
         }
     }
@@ -71,7 +73,7 @@ fn s3_key(video_id: &str, quality: &Quality) -> String {
 async fn main() {
     dotenv::dotenv().ok();
     let state = AppState::new().await;
-    let token = state.admin_token;
+    let admin_token = state.admin_token.clone();
     let app = Router::new()
         .route("/", get(index))
         .route("/list", get(list_ids))
@@ -85,7 +87,13 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:2342").await.unwrap();
     let addr = listener.local_addr().unwrap();
     log!("Listening on http://{addr}", LogType::Debug);
-    log!("Admin page: http://{addr}/admin/{token}", LogType::Info);
+    match admin_token {
+        Some(token) => log!("Admin page: http://{addr}/admin/{token}", LogType::Info),
+        None => log!(
+            "ADMIN_TOKEN is not set, admin endpoints are disabled",
+            LogType::Warning
+        ),
+    }
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -107,7 +115,7 @@ async fn list_ids(Extension(state): Extension<AppState>) -> impl IntoResponse {
 }
 
 fn is_admin(token: &str, state: &AppState) -> bool {
-    Uuid::parse_str(token).ok() == Some(state.admin_token)
+    state.admin_token.as_deref() == Some(token)
 }
 
 async fn admin_page(
