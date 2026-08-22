@@ -74,6 +74,20 @@
       const grid = document.getElementById("grid");
       const status = document.getElementById("status");
 
+      // Only start fetching a thumbnail once its card is about to be visible
+      const imageObserver = new IntersectionObserver(
+        (entries, observer) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+              const img = entry.target;
+              img.src = img.dataset.src;
+              observer.unobserve(img);
+            }
+          });
+        },
+        { rootMargin: "50px 0px", threshold: 0.1 }
+      );
+
       load();
 
       async function load() {
@@ -100,10 +114,10 @@
         card.target = "_blank";
 
         const img = document.createElement("img");
-        img.src = `/${id}`;
-        img.loading = "lazy";
+        img.dataset.src = `/${id}`;
         img.alt = id;
         card.appendChild(img);
+        imageObserver.observe(img);
 
         const row = document.createElement("div");
         row.className = "row";
@@ -130,6 +144,7 @@
             method: "DELETE",
           });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          imageObserver.unobserve(card.querySelector("img"));
           card.remove();
         } catch (e) {
           alert(`Delete failed: ${e.message}`);
