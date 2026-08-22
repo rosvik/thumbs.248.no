@@ -21,12 +21,18 @@
         color: rgb(242, 151, 24);
         text-decoration: none;
       }
+      /* Cards are appended, so cards already on the page keeps their horizontal
+         position when new cards arrive. The grid is flipped, and each card
+         flipped back, which anchors wrapping at the bottom right and puts the
+         newest card top left. */
       .grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
         gap: 1em;
+        transform: rotate(180deg);
       }
       .card {
+        transform: rotate(180deg);
         border: 1px solid gray;
         background-color: #1f2931;
         padding: 0.5em;
@@ -121,7 +127,7 @@
           const [flag, id] = event.data.split(" ");
           if (!id || seen.has(id)) return;
           seen.add(id);
-          grid.prepend(card(id, flag));
+          grid.append(card(id, flag));
           status.textContent = `${seen.size} thumbnails`;
           status.className = "muted";
         });
