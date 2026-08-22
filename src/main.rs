@@ -7,15 +7,17 @@ use anyhow::Result;
 use axum::{
     Extension, Router,
     body::{Body, Bytes},
-    extract::Path,
+    extract::{
+        Path,
+        ws::{Message, WebSocket, WebSocketUpgrade},
+    },
     http::Response,
     response::{Html, IntoResponse},
     routing::{delete, get},
 };
 use regex::Regex;
 use reqwest::StatusCode;
-use std::{collections::VecDeque, sync::Arc};
-use tokio::sync::RwLock;
+use tokio::sync::broadcast;
 use tower_http::cors::{Any, CorsLayer};
 
 mod log;
@@ -27,7 +29,7 @@ pub struct AppState {
     bucket: s3::Bucket,
     redis_pool: Box<RedisPool>,
     admin_token: Option<String>,
-    recent: Arc<RwLock<VecDeque<String>>>,
+    loaded: broadcast::Sender<String>,
 }
 impl AppState {
     async fn new() -> Self {
@@ -36,24 +38,20 @@ impl AppState {
         let admin_token = std::env::var("ADMIN_TOKEN")
             .ok()
             .filter(|token| !token.is_empty());
+        let (loaded, _) = broadcast::channel(64);
         AppState {
             bucket,
             redis_pool,
             admin_token,
-            recent: Arc::new(RwLock::new(VecDeque::new())),
+            loaded,
         }
     }
 
-    async fn record_recent(&self, video_id: &str) {
-        let mut recent = self.recent.write().await;
-        recent.retain(|id| id != video_id);
-        recent.push_front(video_id.to_string());
-        recent.truncate(RECENT_COUNT);
+    /// Broadcast to connected admin pages
+    fn announce_load(&self, video_id: &str) {
+        let _ = self.loaded.send(video_id.to_string());
     }
 }
-
-/// Number of recently loaded video IDs kept for the admin page
-const RECENT_COUNT: usize = 1000;
 
 /// Supported qualities for thumbnails, in order of preference
 const SUPPORTED_QUALITIES: [Quality; 6] = [
@@ -78,7 +76,7 @@ async fn main() {
         .route("/", get(index))
         .route("/list", get(list_ids))
         .route("/admin/{token}", get(admin_page))
-        .route("/admin/{token}/thumbnails", get(list_recents))
+        .route("/admin/{token}/firehose", get(admin_firehose))
         .route("/admin/{token}/thumbnail/{video_id}", delete(admin_delete))
         .route("/{video_id}", get(get_thumbnail))
         .layer(Extension(state))
@@ -129,17 +127,37 @@ async fn admin_page(
     Html(include_str!("../templates/admin.html")).into_response()
 }
 
-async fn list_recents(
+async fn admin_firehose(
     Path(token): Path<String>,
+    ws: WebSocketUpgrade,
     Extension(state): Extension<AppState>,
 ) -> impl IntoResponse {
     if !is_admin(&token, &state) {
         log!("UNAUTHORIZED: Invalid admin token", LogType::Warning);
-        return (StatusCode::UNAUTHORIZED, "Not found".to_string());
+        return (StatusCode::UNAUTHORIZED, "Not found").into_response();
     }
-    let recent = state.recent.read().await;
-    let ids = recent.iter().cloned().collect::<Vec<String>>();
-    (StatusCode::OK, ids.join("\n"))
+    let loaded = state.loaded.subscribe();
+    ws.on_upgrade(move |socket| firehose_stream(socket, loaded))
+        .into_response()
+}
+
+async fn firehose_stream(mut socket: WebSocket, mut loaded: broadcast::Receiver<String>) {
+    log!("ADMIN: Firehose connected", LogType::Debug);
+    loop {
+        match loaded.recv().await {
+            Ok(video_id) => {
+                if socket.send(Message::text(video_id)).await.is_err() {
+                    break;
+                }
+            }
+            Err(broadcast::error::RecvError::Lagged(skipped)) => log!(
+                "ADMIN: Firehose lagged, skipped {skipped} loads",
+                LogType::Warning
+            ),
+            Err(broadcast::error::RecvError::Closed) => break,
+        }
+    }
+    log!("ADMIN: Firehose disconnected", LogType::Debug);
 }
 
 async fn admin_delete(
@@ -219,7 +237,7 @@ async fn get_thumbnail(
     );
     if let Some((data, quality)) = cached_data {
         log!("CACHE: {video_id} - {quality}", LogType::Debug);
-        state.record_recent(&video_id).await;
+        state.announce_load(&video_id);
         return image_response(data, &quality, true);
     }
 
@@ -246,7 +264,7 @@ async fn get_thumbnail(
     let body = body.unwrap();
     let quality = quality.unwrap();
 
-    state.record_recent(&video_id).await;
+    state.announce_load(&video_id);
     save_to_cache(
         state.bucket,
         &state.redis_pool,

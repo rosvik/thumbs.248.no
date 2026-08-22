@@ -65,8 +65,8 @@
     </style>
   </head>
   <body>
-    <h1>Recently loaded thumbnails</h1>
-    <p id="status" class="muted">Loading...</p>
+    <h1>Loaded thumbnails</h1>
+    <p id="status" class="muted">Connecting...</p>
     <div class="grid" id="grid"></div>
 
     <script>
@@ -88,23 +88,37 @@
         { rootMargin: "50px 0px", threshold: 0.1 }
       );
 
-      load();
+      // De-duplicates thumbnails already on the page. Without this, the
+      // page would keep adding cards for its own requests.
+      const seen = new Set();
 
-      async function load() {
-        let ids = [];
-        try {
-          const response = await fetch(`${base}/thumbnails`);
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const text = await response.text();
-          ids = text.split("\n").filter((id) => id.length > 0);
-        } catch (e) {
-          status.textContent = `Failed to load list: ${e.message}`;
+      connect();
+
+      function connect() {
+        const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+        const socket = new WebSocket(
+          `${scheme}://${window.location.host}${base}/firehose`
+        );
+
+        socket.addEventListener("open", () => {
+          status.textContent = "Waiting for thumbnails...";
+          status.className = "muted";
+        });
+
+        socket.addEventListener("message", (event) => {
+          const id = event.data;
+          if (!id || seen.has(id)) return;
+          seen.add(id);
+          grid.prepend(card(id));
+          status.textContent = `${seen.size} thumbnails`;
+          status.className = "muted";
+        });
+
+        socket.addEventListener("close", () => {
+          status.textContent = "Disconnected, reconnecting...";
           status.className = "error";
-          return;
-        }
-
-        status.textContent = `${ids.length} thumbnails`;
-        for (const id of ids) grid.appendChild(card(id));
+          setTimeout(connect, 2000);
+        });
       }
 
       function card(id) {
@@ -146,6 +160,8 @@
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           imageObserver.unobserve(card.querySelector("img"));
           card.remove();
+          seen.delete(id);
+          status.textContent = `${seen.size} thumbnails`;
         } catch (e) {
           alert(`Delete failed: ${e.message}`);
         }
