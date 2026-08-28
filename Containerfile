@@ -5,7 +5,12 @@ FROM rust:1.88-alpine3.20 as builder
 ENV RUSTFLAGS="-C target-feature=-crt-static"
 RUN apk add --no-cache musl-dev openssl-dev
 WORKDIR /app
-COPY ./ /app
+COPY src/ /app/src/
+COPY templates/ /app/templates/
+COPY Cargo.toml /app/Cargo.toml
+COPY Cargo.lock /app/Cargo.lock
+COPY fallback.webp /app/fallback.webp
+
 RUN cargo build --release
 RUN strip target/release/thumbs-248-no
 
