@@ -76,8 +76,8 @@ async fn main() {
     let app = Router::new()
         .route("/", get(index))
         .route("/list", get(list_ids))
+        .route("/firehose", get(firehose))
         .route("/admin/{token}", get(admin_page))
-        .route("/admin/{token}/firehose", get(admin_firehose))
         .route("/admin/{token}/thumbnail/{video_id}", delete(admin_delete))
         .route("/{video_id}", get(get_thumbnail))
         .layer(Extension(state))
@@ -128,22 +128,17 @@ async fn admin_page(
     Html(include_str!("../templates/admin.html")).into_response()
 }
 
-async fn admin_firehose(
-    Path(token): Path<String>,
+async fn firehose(
     ws: WebSocketUpgrade,
     Extension(state): Extension<AppState>,
 ) -> impl IntoResponse {
-    if !is_admin(&token, &state) {
-        log!("UNAUTHORIZED: Invalid admin token", LogType::Warning);
-        return (StatusCode::UNAUTHORIZED, "Not found").into_response();
-    }
     let loaded = state.loaded.subscribe();
     ws.on_upgrade(move |socket| firehose_stream(socket, loaded))
         .into_response()
 }
 
 async fn firehose_stream(mut socket: WebSocket, mut loaded: broadcast::Receiver<String>) {
-    log!("ADMIN: Firehose connected", LogType::Debug);
+    log!("FIREHOSE: Connected", LogType::Debug);
     loop {
         match loaded.recv().await {
             Ok(video_id) => {
@@ -152,13 +147,13 @@ async fn firehose_stream(mut socket: WebSocket, mut loaded: broadcast::Receiver<
                 }
             }
             Err(broadcast::error::RecvError::Lagged(skipped)) => log!(
-                "ADMIN: Firehose lagged, skipped {skipped} loads",
+                "FIREHOSE: Lagged, skipped {skipped} loads",
                 LogType::Warning
             ),
             Err(broadcast::error::RecvError::Closed) => break,
         }
     }
-    log!("ADMIN: Firehose disconnected", LogType::Debug);
+    log!("FIREHOSE: Disconnected", LogType::Debug);
 }
 
 async fn admin_delete(
