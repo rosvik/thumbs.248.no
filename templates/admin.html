@@ -114,7 +114,7 @@
       function connect() {
         const scheme = window.location.protocol === "https:" ? "wss" : "ws";
         const socket = new WebSocket(
-          `${scheme}://${window.location.host}${base}/firehose`
+          `${scheme}://${window.location.host}/firehose`
         );
 
         socket.addEventListener("open", () => {
