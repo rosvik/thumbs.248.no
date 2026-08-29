@@ -77,8 +77,7 @@ async fn main() {
         .route("/", get(index))
         .route("/list", get(list_ids))
         .route("/firehose", get(firehose))
-        .route("/admin/{token}", get(admin_page))
-        .route("/admin/{token}/thumbnail/{video_id}", delete(admin_delete))
+        .route("/delete/{token}/{video_id}", delete(admin_delete))
         .route("/{video_id}", get(get_thumbnail))
         .layer(Extension(state))
         .layer(CorsLayer::new().allow_origin(Any));
@@ -115,17 +114,6 @@ async fn list_ids(Extension(state): Extension<AppState>) -> impl IntoResponse {
 
 fn is_admin(token: &str, state: &AppState) -> bool {
     state.admin_token.as_deref() == Some(token)
-}
-
-async fn admin_page(
-    Path(token): Path<String>,
-    Extension(state): Extension<AppState>,
-) -> impl IntoResponse {
-    if !is_admin(&token, &state) {
-        log!("UNAUTHORIZED: Invalid admin token", LogType::Warning);
-        return (StatusCode::UNAUTHORIZED, Html("Not found")).into_response();
-    }
-    Html(include_str!("../templates/admin.html")).into_response()
 }
 
 async fn firehose(
