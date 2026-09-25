@@ -1,20 +1,22 @@
+# To initialize the bucket, run:
+# curl -X PUT --aws-sigv4 "aws:amz:eu:s3" --user admin:password http://localhost:9000/thumbs
+
 [[containers]]
-name = "thumbs-minio"
-image = "quay.io/minio/minio"
+name = "thumbs-rustfs"
+image = "rustfs/rustfs:1.0.0"
 network = "thumbs"
 ports = [
   "9000:9000",
   "9001:9001",
 ]
 env = [
-  "MINIO_ROOT_USER=admin",
-  "MINIO_ROOT_PASSWORD=password123",
-  "MINIO_ACCESS_KEY=accesskey",
-  "MINIO_SECRET_KEY=secretkey",
-  "MINIO_BUCKET=thumbs"
+  "RUSTFS_CONSOLE_ENABLE=true",
 ]
-volumes = ["thumbs-minio:/data"]
-cmd = ["server","--console-address",":9001","/data"]
+secrets = [
+  "S3_ACCESS_KEY:RUSTFS_ACCESS_KEY",
+  "S3_SECRET_KEY:RUSTFS_SECRET_KEY",
+]
+volumes = ["thumbs-rustfs:/data"]
 
 [[containers]]
 name = "thumbs-redis"
