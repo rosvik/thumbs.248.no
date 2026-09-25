@@ -11,7 +11,7 @@ use axum::{
         Path,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::Response,
+    http::{self, HeaderMap, Response},
     response::{Html, IntoResponse},
     routing::{delete, get},
 };
@@ -28,21 +28,21 @@ mod storage;
 pub struct AppState {
     bucket: s3::Bucket,
     redis_pool: Box<RedisPool>,
-    admin_token: Option<String>,
+    access_token: Option<String>,
     loaded: broadcast::Sender<String>,
 }
 impl AppState {
     async fn new() -> Self {
         let bucket = storage::s3_connection().await;
         let redis_pool = storage::redis_pool().await;
-        let admin_token = std::env::var("ADMIN_TOKEN")
+        let access_token = std::env::var("ACCESS_TOKEN")
             .ok()
             .filter(|token| !token.is_empty());
         let (loaded, _) = broadcast::channel(64);
         AppState {
             bucket,
             redis_pool,
-            admin_token,
+            access_token,
             loaded,
         }
     }
@@ -72,12 +72,14 @@ fn s3_key(video_id: &str, quality: &Quality) -> String {
 async fn main() {
     dotenv::dotenv().ok();
     let state = AppState::new().await;
-    let admin_token = state.admin_token.clone();
+    if state.access_token.is_none() {
+        log!("ACCESS_TOKEN not set", LogType::Warning);
+    }
     let app = Router::new()
         .route("/", get(index))
         .route("/list", get(list_ids))
         .route("/firehose", get(firehose))
-        .route("/delete/{token}/{video_id}", delete(admin_delete))
+        .route("/delete/{video_id}", delete(admin_delete))
         .route("/{video_id}", get(get_thumbnail))
         .layer(Extension(state))
         .layer(CorsLayer::new().allow_origin(Any));
@@ -85,13 +87,6 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:2342").await.unwrap();
     let addr = listener.local_addr().unwrap();
     log!("Listening on http://{addr}", LogType::Debug);
-    match admin_token {
-        Some(token) => log!("Admin page: http://{addr}/admin/{token}", LogType::Info),
-        None => log!(
-            "ADMIN_TOKEN is not set, admin endpoints are disabled",
-            LogType::Warning
-        ),
-    }
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -112,8 +107,14 @@ async fn list_ids(Extension(state): Extension<AppState>) -> impl IntoResponse {
     (StatusCode::OK, ids.join("\n"))
 }
 
-fn is_admin(token: &str, state: &AppState) -> bool {
-    state.admin_token.as_deref() == Some(token)
+fn check_auth(headers: &HeaderMap, state: &AppState) -> bool {
+    let authorization = headers
+        .get(http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    let token = authorization.strip_prefix("Bearer ").unwrap_or("");
+
+    state.access_token.as_deref() == Some(token)
 }
 
 async fn firehose(
@@ -145,12 +146,13 @@ async fn firehose_stream(mut socket: WebSocket, mut loaded: broadcast::Receiver<
 }
 
 async fn admin_delete(
-    Path((token, video_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Path(video_id): Path<String>,
     Extension(state): Extension<AppState>,
 ) -> impl IntoResponse {
-    if !is_admin(&token, &state) {
-        log!("UNAUTHORIZED: Invalid admin token", LogType::Warning);
-        return (StatusCode::UNAUTHORIZED, "Not found");
+    if !check_auth(&headers, &state) {
+        log!("UNAUTHORIZED: Invalid access token", LogType::Warning);
+        return (StatusCode::UNAUTHORIZED, "Unauthorized");
     }
     if !validate_video_id(&video_id) {
         log!(
