@@ -381,6 +381,7 @@ fn image_response(data: impl Into<Body>, quality: &Quality, cache_hit: bool) -> 
     };
     Response::builder()
         .header("Content-Type", content_type)
+        .header("Quality", quality.slug())
         .header(
             "Cache-Status",
             match cache_hit {
