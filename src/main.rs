@@ -23,6 +23,7 @@ use tower_http::cors::{Any, CorsLayer};
 mod log;
 mod quality;
 mod storage;
+mod utils;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -79,6 +80,7 @@ async fn main() {
         .route("/", get(index))
         .route("/list", get(list_ids))
         .route("/firehose", get(firehose))
+        .route("/avatar/{channel_id}", get(get_avatar))
         .route("/delete/{video_id}", delete(admin_delete))
         .route("/{video_id}", get(get_thumbnail))
         .layer(Extension(state))
@@ -88,6 +90,58 @@ async fn main() {
     let addr = listener.local_addr().unwrap();
     log!("Listening on http://{addr}", LogType::Debug);
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn get_avatar(Path(channel_id): Path<String>) -> impl IntoResponse {
+    if !utils::validate_channel_id(&channel_id) {
+        log!("Invalid channel_id", LogType::Error);
+        return fallback_response(400);
+    }
+
+    let og_url = format!(
+        "https://og.248.no/api?url=https%3A%2F%2Fwww.youtube.com%2Fchannel%2F{}",
+        channel_id
+    );
+    let Ok(response) = reqwest::get(&og_url).await else {
+        log!("Error fetching og image", LogType::Error);
+        return fallback_response(500);
+    };
+    let Ok(body) = response.text().await else {
+        log!("Error reading response", LogType::Error);
+        return fallback_response(500);
+    };
+    let Ok(og) = serde_json::from_str::<Vec<utils::OgValue>>(&body) else {
+        log!("Error parsing og data", LogType::Error);
+        return fallback_response(500);
+    };
+
+    let Some(og_image) = utils::get_og_content(&og, "og:image") else {
+        log!("No og:image field", LogType::Error);
+        return fallback_response(404);
+    };
+
+    let Some(source_url) = utils::to_source_url(&og_image) else {
+        log!("Invalid og:image url", LogType::Error);
+        return fallback_response(404);
+    };
+
+    let Ok(response) = reqwest::get(&source_url).await else {
+        log!("Error fetching avatar", LogType::Error);
+        return fallback_response(404);
+    };
+    let Ok(avatar) = response.bytes().await else {
+        log!("Error reading avatar", LogType::Error);
+        return fallback_response(404);
+    };
+
+    log!("NEW: {channel_id}", LogType::Info);
+    Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::from(avatar))
+        .unwrap_or_else(|_| {
+            log!("Error building body", LogType::Error);
+            fallback_response(500)
+        })
 }
 
 async fn index() -> Html<&'static str> {
