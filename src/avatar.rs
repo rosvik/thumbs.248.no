@@ -1,8 +1,10 @@
 use crate::log;
+use crate::quality::ImageType;
 use crate::storage;
 use crate::storage::RedisPool;
 use crate::{AppState, log::LogType, utils};
 use axum::body::Bytes;
+use axum::http::HeaderValue;
 use axum::{Extension, body::Body, extract::Path, http::Response, response::IntoResponse};
 use reqwest::StatusCode;
 
@@ -23,9 +25,15 @@ pub async fn get_avatar(
     {
         if let Ok(avatar) = storage::get_s3_object(&state.avatar_bucket, &s3_key).await {
             let bytes = avatar.bytes().to_vec();
-            log!("CACHE: {channel_id}", LogType::Debug);
+            let Some(image_type) = ImageType::from_file_name(&s3_key) else {
+                log!("Invalid s3 key: {s3_key}", LogType::Error);
+                return utils::fallback_response(404);
+            };
+            let content_type = image_type.content_type();
+            log!("CACHE: {channel_id} ({content_type})", LogType::Debug);
             return Response::builder()
                 .status(StatusCode::OK)
+                .header("Content-Type", content_type)
                 .body(bytes.into())
                 .unwrap_or_else(|_| {
                     log!("Error building body", LogType::Error);
@@ -38,12 +46,12 @@ pub async fn get_avatar(
         "https://og.248.no/api?url=https%3A%2F%2Fwww.youtube.com%2Fchannel%2F{}",
         channel_id
     );
-    let Some(og_image) = utils::get_og_content(&og_url, "og:image").await else {
+    let Some(og_image_url) = utils::get_og_content(&og_url, "og:image").await else {
         log!("No og:image field", LogType::Error);
         return utils::fallback_response(404);
     };
 
-    let Some(source_url) = utils::to_source_url(&og_image) else {
+    let Some(source_url) = utils::to_source_url(&og_image_url) else {
         log!("Invalid og:image url", LogType::Error);
         return utils::fallback_response(404);
     };
@@ -56,12 +64,29 @@ pub async fn get_avatar(
         log!("Error fetching avatar", LogType::Error);
         return utils::fallback_response(404);
     }
+
+    let content_type = response
+        .headers()
+        .get("Content-Type")
+        .cloned()
+        .unwrap_or(HeaderValue::from_static(""));
+    let content_type = content_type.to_str().unwrap_or_default();
+
+    let image_type = match ImageType::from_content_type(&content_type) {
+        Some(image_type) => image_type,
+        None => {
+            log!("Unknown content type: {content_type}", LogType::Error);
+            return utils::fallback_response(404);
+        }
+    };
+    let s3_key = avatar_s3_key(&channel_id, image_type);
+
     let Ok(avatar) = response.bytes().await else {
         log!("Error reading avatar", LogType::Error);
         return utils::fallback_response(404);
     };
 
-    let Ok(_) = storage::put_s3_object(&state.avatar_bucket, &channel_id, &avatar).await else {
+    let Ok(_) = storage::put_s3_object(&state.avatar_bucket, &s3_key, &avatar).await else {
         log!("Error uploading avatar", LogType::Error);
         return utils::fallback_response(500);
     };
@@ -70,7 +95,7 @@ pub async fn get_avatar(
         state.avatar_bucket,
         &state.redis_pool,
         &redis_key,
-        &channel_id,
+        &s3_key,
         avatar.clone(),
     )
     .await;
@@ -82,9 +107,10 @@ pub async fn get_avatar(
         return utils::fallback_response(500);
     };
 
-    log!("NEW: {channel_id}", LogType::Info);
+    log!("NEW: {channel_id} ({content_type})", LogType::Info);
     Response::builder()
         .status(StatusCode::OK)
+        .header("Content-Type", image_type.content_type())
         .body(Body::from(avatar))
         .unwrap_or_else(|_| {
             log!("Error building body", LogType::Error);
@@ -94,6 +120,9 @@ pub async fn get_avatar(
 
 pub fn avatar_redis_key(channel_id: &str) -> String {
     format!("avatar:{channel_id}")
+}
+pub fn avatar_s3_key(channel_id: &str, image_type: ImageType) -> String {
+    format!("{channel_id}.{}", image_type.file_extension())
 }
 
 async fn save_to_cache(
