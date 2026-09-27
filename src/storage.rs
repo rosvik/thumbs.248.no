@@ -46,7 +46,7 @@ fn s3_region() -> s3::Region {
     }
 }
 
-pub async fn s3_connection() -> s3::Bucket {
+pub async fn s3_connection(bucket_env: &str) -> s3::Bucket {
     let credentials = Credentials {
         access_key: Some(std::env::var("S3_ACCESS_KEY").expect("S3_ACCESS_KEY is not set")),
         secret_key: Some(std::env::var("S3_SECRET_KEY").expect("S3_SECRET_KEY is not set")),
@@ -55,7 +55,7 @@ pub async fn s3_connection() -> s3::Bucket {
         session_token: None,
     };
     let mut bucket = s3::Bucket::new(
-        &std::env::var("S3_BUCKET").expect("S3_BUCKET is not set"),
+        &std::env::var(bucket_env).unwrap_or_else(|_| panic!("{bucket_env} is not set")),
         s3_region(),
         credentials,
     )
@@ -83,10 +83,7 @@ pub async fn get_s3_object(
     bucket.get_object(key).await
 }
 
-pub async fn delete_s3_object(
-    bucket: &s3::Bucket,
-    key: &str,
-) -> Result<(), s3::error::S3Error> {
+pub async fn delete_s3_object(bucket: &s3::Bucket, key: &str) -> Result<(), s3::error::S3Error> {
     bucket.delete_object(key).await?;
     Ok(())
 }

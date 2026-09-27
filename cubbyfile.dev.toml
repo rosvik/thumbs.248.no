@@ -1,5 +1,6 @@
-# To initialize the bucket, run:
+# To initialize the buckets, run:
 # curl -X PUT --aws-sigv4 "aws:amz:eu:s3" --user admin:password http://localhost:9000/thumbs
+# curl -X PUT --aws-sigv4 "aws:amz:eu:s3" --user admin:password http://localhost:9000/avatars
 
 [[containers]]
 name = "thumbs-rustfs"

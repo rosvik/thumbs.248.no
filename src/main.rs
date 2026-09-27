@@ -15,11 +15,11 @@ use axum::{
     response::{Html, IntoResponse},
     routing::{delete, get},
 };
-use regex::Regex;
 use reqwest::StatusCode;
 use tokio::sync::broadcast;
 use tower_http::cors::{Any, CorsLayer};
 
+mod avatar;
 mod log;
 mod quality;
 mod storage;
@@ -27,21 +27,24 @@ mod utils;
 
 #[derive(Clone)]
 pub struct AppState {
-    bucket: s3::Bucket,
+    thumbs_bucket: s3::Bucket,
+    avatar_bucket: s3::Bucket,
     redis_pool: Box<RedisPool>,
     access_token: Option<String>,
     loaded: broadcast::Sender<String>,
 }
 impl AppState {
     async fn new() -> Self {
-        let bucket = storage::s3_connection().await;
+        let thumbs_bucket = storage::s3_connection("S3_THUMBNAIL_BUCKET").await;
+        let avatar_bucket = storage::s3_connection("S3_AVATAR_BUCKET").await;
         let redis_pool = storage::redis_pool().await;
         let access_token = std::env::var("ACCESS_TOKEN")
             .ok()
             .filter(|token| !token.is_empty());
         let (loaded, _) = broadcast::channel(64);
         AppState {
-            bucket,
+            thumbs_bucket,
+            avatar_bucket,
             redis_pool,
             access_token,
             loaded,
@@ -65,7 +68,7 @@ const SUPPORTED_QUALITIES: [Quality; 6] = [
     Quality::JpgHq,
 ];
 
-fn s3_key(video_id: &str, quality: &Quality) -> String {
+fn thumb_s3_key(video_id: &str, quality: &Quality) -> String {
     format!("{video_id}.{}.{}", quality.slug(), quality.file_extension())
 }
 
@@ -80,7 +83,7 @@ async fn main() {
         .route("/", get(index))
         .route("/list", get(list_ids))
         .route("/firehose", get(firehose))
-        .route("/avatar/{channel_id}", get(get_avatar))
+        .route("/avatar/{channel_id}", get(avatar::get_avatar))
         .route("/delete/{video_id}", delete(admin_delete))
         .route("/{video_id}", get(get_thumbnail))
         .layer(Extension(state))
@@ -90,58 +93,6 @@ async fn main() {
     let addr = listener.local_addr().unwrap();
     log!("Listening on http://{addr}", LogType::Debug);
     axum::serve(listener, app).await.unwrap();
-}
-
-async fn get_avatar(Path(channel_id): Path<String>) -> impl IntoResponse {
-    if !utils::validate_channel_id(&channel_id) {
-        log!("Invalid channel_id", LogType::Error);
-        return fallback_response(400);
-    }
-
-    let og_url = format!(
-        "https://og.248.no/api?url=https%3A%2F%2Fwww.youtube.com%2Fchannel%2F{}",
-        channel_id
-    );
-    let Ok(response) = reqwest::get(&og_url).await else {
-        log!("Error fetching og image", LogType::Error);
-        return fallback_response(500);
-    };
-    let Ok(body) = response.text().await else {
-        log!("Error reading response", LogType::Error);
-        return fallback_response(500);
-    };
-    let Ok(og) = serde_json::from_str::<Vec<utils::OgValue>>(&body) else {
-        log!("Error parsing og data", LogType::Error);
-        return fallback_response(500);
-    };
-
-    let Some(og_image) = utils::get_og_content(&og, "og:image") else {
-        log!("No og:image field", LogType::Error);
-        return fallback_response(404);
-    };
-
-    let Some(source_url) = utils::to_source_url(&og_image) else {
-        log!("Invalid og:image url", LogType::Error);
-        return fallback_response(404);
-    };
-
-    let Ok(response) = reqwest::get(&source_url).await else {
-        log!("Error fetching avatar", LogType::Error);
-        return fallback_response(404);
-    };
-    let Ok(avatar) = response.bytes().await else {
-        log!("Error reading avatar", LogType::Error);
-        return fallback_response(404);
-    };
-
-    log!("NEW: {channel_id}", LogType::Info);
-    Response::builder()
-        .status(StatusCode::OK)
-        .body(Body::from(avatar))
-        .unwrap_or_else(|_| {
-            log!("Error building body", LogType::Error);
-            fallback_response(500)
-        })
 }
 
 async fn index() -> Html<&'static str> {
@@ -157,7 +108,12 @@ async fn list_ids(Extension(state): Extension<AppState>) -> impl IntoResponse {
             "Error listing thumbnails".to_string(),
         );
     }
-    let ids = keys.unwrap();
+    // Video IDs never contain ':', so this skips prefixed keys like `avatar:{channel_id}`
+    let ids: Vec<String> = keys
+        .unwrap()
+        .into_iter()
+        .filter(|key| !key.contains(':'))
+        .collect();
     (StatusCode::OK, ids.join("\n"))
 }
 
@@ -208,7 +164,7 @@ async fn admin_delete(
         log!("UNAUTHORIZED: Invalid access token", LogType::Warning);
         return (StatusCode::UNAUTHORIZED, "Unauthorized");
     }
-    if !validate_video_id(&video_id) {
+    if !utils::validate_video_id(&video_id) {
         log!(
             "BAD REQUEST: Invalid video ID: {video_id}",
             LogType::Warning
@@ -228,7 +184,7 @@ async fn admin_delete(
         }
     };
 
-    if let Err(e) = storage::delete_s3_object(&state.bucket, &s3_key).await {
+    if let Err(e) = storage::delete_s3_object(&state.thumbs_bucket, &s3_key).await {
         log!(
             "ERROR: Error deleting {s3_key} from s3: {e}",
             LogType::Error
@@ -257,19 +213,20 @@ async fn get_thumbnail(
     Path(video_id): Path<String>,
     Extension(state): Extension<AppState>,
 ) -> impl IntoResponse {
-    if !validate_video_id(&video_id) {
+    if !utils::validate_video_id(&video_id) {
         log!("NOT FOUND: Invalid video ID: {video_id}", LogType::Warning);
-        return fallback_response(400);
+        return utils::fallback_response(400);
     }
 
     // If the image is already cached, return it
     let now = std::time::Instant::now();
-    let cached_data = match fetch_from_cache(&state.bucket, &state.redis_pool, &video_id).await {
-        Ok(data) => data,
-        Err(_) => {
-            return fallback_response(500);
-        }
-    };
+    let cached_data =
+        match fetch_from_cache(&state.thumbs_bucket, &state.redis_pool, &video_id).await {
+            Ok(data) => data,
+            Err(_) => {
+                return utils::fallback_response(500);
+            }
+        };
     log!(
         "CACHE READ: {video_id} - {}ms",
         LogType::Performance,
@@ -278,7 +235,7 @@ async fn get_thumbnail(
     if let Some((data, quality)) = cached_data {
         log!("CACHE: {video_id} - {quality}", LogType::Debug);
         state.announce_load(&video_id, true);
-        return image_response(data, &quality, true);
+        return thumbnail_response(data, &quality, true);
     }
 
     let mut quality: Option<Quality> = None;
@@ -292,21 +249,21 @@ async fn get_thumbnail(
             }
             Err(e) => {
                 if e != StatusCode::NOT_FOUND {
-                    return fallback_response(e.as_u16());
+                    return utils::fallback_response(e.as_u16());
                 }
                 continue;
             }
         }
     }
     if body.is_none() || quality.is_none() {
-        return fallback_response(500);
+        return utils::fallback_response(500);
     }
     let body = body.unwrap();
     let quality = quality.unwrap();
 
     state.announce_load(&video_id, false);
     save_to_cache(
-        state.bucket,
+        state.thumbs_bucket,
         &state.redis_pool,
         &video_id,
         &quality,
@@ -315,7 +272,7 @@ async fn get_thumbnail(
     .await;
 
     log!("NEW: {video_id} - {quality}", LogType::Info);
-    image_response(body, &quality, false)
+    thumbnail_response(body, &quality, false)
 }
 
 async fn fetch_thumbnail(video_id: &str, quality: &Quality) -> Result<Bytes, StatusCode> {
@@ -375,7 +332,7 @@ async fn save_to_cache(
     quality: &Quality,
     data: Bytes,
 ) {
-    let key = s3_key(video_id, quality);
+    let key = thumb_s3_key(video_id, quality);
     let video_id = video_id.to_string();
     let redis_pool = redis_pool.clone();
     tokio::spawn(async move {
@@ -427,7 +384,7 @@ async fn fetch_from_cache(
     Ok(None)
 }
 
-fn image_response(data: impl Into<Body>, quality: &Quality, cache_hit: bool) -> Response<Body> {
+fn thumbnail_response(data: impl Into<Body>, quality: &Quality, cache_hit: bool) -> Response<Body> {
     let content_type = match quality.file_extension() {
         "webp" => "image/webp",
         "jpg" => "image/jpeg",
@@ -446,24 +403,6 @@ fn image_response(data: impl Into<Body>, quality: &Quality, cache_hit: bool) -> 
         .body(data.into())
         .unwrap()
 }
-
-fn fallback_response(status: u16) -> Response<Body> {
-    let fallback_image = include_bytes!("../fallback.webp");
-    Response::builder()
-        .status(status)
-        .header("Content-Type", "image/webp")
-        .body(Body::from(fallback_image.to_vec()))
-        .unwrap()
-}
-
-/// Validate the video ID is a valid YouTube video ID
-///
-/// Source: https://wiki.archiveteam.org/index.php/YouTube/Technical_details
-fn validate_video_id(video_id: &str) -> bool {
-    let re = Regex::new(r"^[A-Za-z0-9_-]{10}[AEIMQUYcgkosw048]$").unwrap();
-    re.is_match(video_id)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -471,27 +410,27 @@ mod tests {
     #[test]
     fn test_thumbnail_path() {
         assert_eq!(
-            s3_key("aGb3AlQrN9E", &Quality::WebpMaxres),
+            thumb_s3_key("aGb3AlQrN9E", &Quality::WebpMaxres),
             "aGb3AlQrN9E.maxresdefault.webp".to_string()
         );
         assert_eq!(
-            s3_key("aGb3AlQrN9E", &Quality::JpgMaxres),
+            thumb_s3_key("aGb3AlQrN9E", &Quality::JpgMaxres),
             "aGb3AlQrN9E.maxresdefault.jpg".to_string()
         );
         assert_eq!(
-            s3_key("aGb3AlQrN9E", &Quality::WebpSd),
+            thumb_s3_key("aGb3AlQrN9E", &Quality::WebpSd),
             "aGb3AlQrN9E.sddefault.webp".to_string()
         );
         assert_eq!(
-            s3_key("aGb3AlQrN9E", &Quality::JpgSd),
+            thumb_s3_key("aGb3AlQrN9E", &Quality::JpgSd),
             "aGb3AlQrN9E.sddefault.jpg".to_string()
         );
         assert_eq!(
-            s3_key("aGb3AlQrN9E", &Quality::WebpHq),
+            thumb_s3_key("aGb3AlQrN9E", &Quality::WebpHq),
             "aGb3AlQrN9E.hqdefault.webp".to_string()
         );
         assert_eq!(
-            s3_key("aGb3AlQrN9E", &Quality::JpgHq),
+            thumb_s3_key("aGb3AlQrN9E", &Quality::JpgHq),
             "aGb3AlQrN9E.hqdefault.jpg".to_string()
         );
     }
