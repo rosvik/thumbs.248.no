@@ -336,16 +336,17 @@ async fn save_to_cache(
     let video_id = video_id.to_string();
     let redis_pool = redis_pool.clone();
     tokio::spawn(async move {
-        let result = storage::put_redis_object(&redis_pool, video_id.as_str(), &key).await;
-        if let Err(e) = result {
+        let s3_result = storage::put_s3_object(&bucket, &key, data.as_ref()).await;
+        if let Err(e) = s3_result {
+            log!("ERROR: Error saving {key} to s3: {e}", LogType::Error);
+            return;
+        }
+        let redis_result = storage::put_redis_object(&redis_pool, video_id.as_str(), &key).await;
+        if let Err(e) = redis_result {
             log!(
-                "ERROR: Error saving thumbnail to redis: {e}",
+                "ERROR: Error saving {video_id} to redis: {e}",
                 LogType::Error
             );
-        }
-        let result = storage::put_s3_object(&bucket, &key, data.as_ref()).await;
-        if let Err(e) = result {
-            log!("ERROR: Error saving thumbnail to s3: {e}", LogType::Error);
         }
     });
 }

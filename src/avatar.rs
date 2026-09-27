@@ -123,16 +123,17 @@ async fn save_to_cache(
     let redis_key = redis_key.to_string();
     let s3_key = s3_key.to_string();
     tokio::spawn(async move {
+        let result = storage::put_s3_object(&bucket, &s3_key, data.as_ref()).await;
+        if let Err(e) = result {
+            log!("ERROR: Error saving {s3_key} to s3: {e}", LogType::Error);
+            return;
+        }
         let result = storage::put_redis_object(&redis_pool, &redis_key, &s3_key).await;
         if let Err(e) = result {
             log!(
                 "ERROR: Error saving {redis_key} to redis: {e}",
                 LogType::Error
             );
-        }
-        let result = storage::put_s3_object(&bucket, &s3_key, data.as_ref()).await;
-        if let Err(e) = result {
-            log!("ERROR: Error saving {s3_key} to s3: {e}", LogType::Error);
         }
     });
 }
