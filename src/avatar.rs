@@ -13,33 +13,32 @@ pub async fn get_avatar(
     Extension(state): Extension<AppState>,
 ) -> impl IntoResponse {
     if !utils::validate_channel_id(&channel_id) {
-        log!("Invalid channel_id", LogType::Error);
+        log!("Invalid channel_id {channel_id}", LogType::Warning);
         return utils::fallback_response(400);
     }
 
     let redis_key = avatar_redis_key(&channel_id);
-    if let Some(s3_key) = storage::get_redis_object(&state.redis_pool, &redis_key.as_str())
+    if let Some(s3_key) = storage::get_redis_object(&state.redis_pool, &redis_key)
         .await
         .ok()
         .flatten()
+        && let Ok(avatar) = storage::get_s3_object(&state.avatar_bucket, &s3_key).await
     {
-        if let Ok(avatar) = storage::get_s3_object(&state.avatar_bucket, &s3_key).await {
-            let bytes = avatar.bytes().to_vec();
-            let Some(image_type) = ImageType::from_file_name(&s3_key) else {
-                log!("Invalid s3 key: {s3_key}", LogType::Error);
-                return utils::fallback_response(404);
-            };
-            let content_type = image_type.content_type();
-            log!("CACHE: {channel_id} ({content_type})", LogType::Debug);
-            return Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", content_type)
-                .body(bytes.into())
-                .unwrap_or_else(|_| {
-                    log!("Error building body", LogType::Error);
-                    utils::fallback_response(500)
-                });
+        let bytes = avatar.bytes().to_vec();
+        let Some(image_type) = ImageType::from_file_name(&s3_key) else {
+            log!("Invalid s3 key: {s3_key}", LogType::Error);
+            return utils::fallback_response(404);
         };
+        let content_type = image_type.content_type();
+        log!("CACHE: {channel_id} ({content_type})", LogType::Debug);
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", content_type)
+            .body(bytes.into())
+            .unwrap_or_else(|_| {
+                log!("Error building body", LogType::Error);
+                utils::fallback_response(500)
+            });
     }
 
     let og_url = format!(
@@ -72,7 +71,7 @@ pub async fn get_avatar(
         .unwrap_or(HeaderValue::from_static(""));
     let content_type = content_type.to_str().unwrap_or_default();
 
-    let image_type = match ImageType::from_content_type(&content_type) {
+    let image_type = match ImageType::from_content_type(content_type) {
         Some(image_type) => image_type,
         None => {
             log!("Unknown content type: {content_type}", LogType::Error);
@@ -86,11 +85,6 @@ pub async fn get_avatar(
         return utils::fallback_response(404);
     };
 
-    let Ok(_) = storage::put_s3_object(&state.avatar_bucket, &s3_key, &avatar).await else {
-        log!("Error uploading avatar", LogType::Error);
-        return utils::fallback_response(500);
-    };
-
     save_to_cache(
         state.avatar_bucket,
         &state.redis_pool,
@@ -99,13 +93,6 @@ pub async fn get_avatar(
         avatar.clone(),
     )
     .await;
-
-    let Ok(_) =
-        storage::put_redis_object(&state.redis_pool, &redis_key.as_str(), &channel_id).await
-    else {
-        log!("Error uploading avatar to redis", LogType::Error);
-        return utils::fallback_response(500);
-    };
 
     log!("NEW: {channel_id} ({content_type})", LogType::Info);
     Response::builder()
@@ -139,13 +126,13 @@ async fn save_to_cache(
         let result = storage::put_redis_object(&redis_pool, &redis_key, &s3_key).await;
         if let Err(e) = result {
             log!(
-                "ERROR: Error saving thumbnail to redis: {e}",
+                "ERROR: Error saving {redis_key} to redis: {e}",
                 LogType::Error
             );
         }
         let result = storage::put_s3_object(&bucket, &s3_key, data.as_ref()).await;
         if let Err(e) = result {
-            log!("ERROR: Error saving thumbnail to s3: {e}", LogType::Error);
+            log!("ERROR: Error saving {s3_key} to s3: {e}", LogType::Error);
         }
     });
 }

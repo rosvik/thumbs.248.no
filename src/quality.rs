@@ -98,9 +98,7 @@ impl ImageType {
         }
     }
     pub fn from_file_name(file_name: &str) -> Option<Self> {
-        let Some(extension) = file_name.split('.').last() else {
-            return None;
-        };
+        let extension = file_name.split('.').next_back()?;
         match extension {
             "webp" => Some(ImageType::Webp),
             "jpg" => Some(ImageType::Jpg),

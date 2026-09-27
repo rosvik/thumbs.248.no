@@ -23,16 +23,14 @@ pub fn validate_video_id(video_id: &str) -> bool {
 // Expected input: https://yt3.googleusercontent.com/xxxxx=s900-c-k-c0x00ffffff-no-rj
 // Source quality: https://yt3.googleusercontent.com/xxxxx=s0
 pub fn to_source_url(url: &str) -> Option<String> {
-    let Ok(image_url) = Url::parse(&url).map_err(|e| e) else {
+    let Ok(image_url) = Url::parse(url) else {
         return None;
     };
     if image_url.host_str() != Some("yt3.googleusercontent.com") {
         return None;
     }
 
-    let Some(stripped_url) = image_url.as_str().split("=").next() else {
-        return None;
-    };
+    let stripped_url = image_url.as_str().split("=").next()?;
 
     let source_url = format!("{stripped_url}=s0");
     Some(source_url)
@@ -62,7 +60,7 @@ pub async fn get_og_content(og_url: &str, property: &str) -> Option<String> {
 
     og.iter()
         .find(|f| f.property == property)
-        .and_then(|f| Some(f.content.clone()))
+        .map(|f| f.content.clone())
 }
 
 pub fn fallback_response(status: u16) -> Response<Body> {
