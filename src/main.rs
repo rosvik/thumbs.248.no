@@ -100,7 +100,9 @@ async fn index() -> Html<&'static str> {
 }
 
 async fn list_ids(Extension(state): Extension<AppState>) -> impl IntoResponse {
+    let now = std::time::Instant::now();
     let keys = storage::list_redis_keys(&state.redis_pool).await;
+    let elapsed = now.elapsed().as_millis();
     if let Err(e) = keys {
         log!("ERROR: Error listing thumbnails: {e}", LogType::Error);
         return (
@@ -114,6 +116,9 @@ async fn list_ids(Extension(state): Extension<AppState>) -> impl IntoResponse {
         .into_iter()
         .filter(|key| !key.contains(':'))
         .collect();
+
+    let count = ids.len();
+    log!("LIST: {count} keys - {elapsed}ms", LogType::Debug);
     (StatusCode::OK, ids.join("\n"))
 }
 
