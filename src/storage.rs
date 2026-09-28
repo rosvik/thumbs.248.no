@@ -1,5 +1,5 @@
 use anyhow::Result;
-use redis::Commands;
+use redis::{Commands, RedisResult, ScanOptions};
 use s3::{creds::Credentials, request::ResponseData};
 use std::boxed::Box;
 
@@ -33,9 +33,14 @@ pub async fn delete_redis_object(pool: &RedisPool, key: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn list_redis_keys(pool: &RedisPool) -> Result<Vec<String>> {
+pub async fn list_redis_keys(pool: &RedisPool, pattern: &str) -> Result<Vec<String>> {
     let mut client = pool.get()?;
-    let result = client.keys::<&str, Vec<String>>("*")?;
+    let opts = ScanOptions::default()
+        .with_pattern(pattern)
+        .with_count(10_000);
+    let result = client
+        .scan_options::<String>(opts)?
+        .collect::<RedisResult<Vec<String>>>()?;
     Ok(result)
 }
 

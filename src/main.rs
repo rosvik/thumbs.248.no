@@ -100,9 +100,11 @@ async fn index() -> Html<&'static str> {
 }
 
 async fn list_ids(Extension(state): Extension<AppState>) -> impl IntoResponse {
+    let pattern = "???????????"; // 11 characters, matching video ID
     let now = std::time::Instant::now();
-    let keys = storage::list_redis_keys(&state.redis_pool).await;
+    let keys = storage::list_redis_keys(&state.redis_pool, pattern).await;
     let elapsed = now.elapsed().as_millis();
+
     if let Err(e) = keys {
         log!("ERROR: Error listing thumbnails: {e}", LogType::Error);
         return (
