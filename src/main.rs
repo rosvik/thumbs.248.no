@@ -68,7 +68,7 @@ const SUPPORTED_QUALITIES: [Quality; 6] = [
     Quality::JpgHq,
 ];
 
-fn thumb_s3_key(video_id: &str, quality: &Quality) -> String {
+fn thumbnail_s3_key(video_id: &str, quality: &Quality) -> String {
     format!("{video_id}.{}.{}", quality.slug(), quality.file_extension())
 }
 
@@ -332,7 +332,7 @@ async fn save_to_cache(
     quality: &Quality,
     data: Bytes,
 ) {
-    let key = thumb_s3_key(video_id, quality);
+    let key = thumbnail_s3_key(video_id, quality);
     let video_id = video_id.to_string();
     let redis_pool = redis_pool.clone();
     tokio::spawn(async move {
@@ -411,27 +411,27 @@ mod tests {
     #[test]
     fn test_thumbnail_path() {
         assert_eq!(
-            thumb_s3_key("aGb3AlQrN9E", &Quality::WebpMaxres),
+            thumbnail_s3_key("aGb3AlQrN9E", &Quality::WebpMaxres),
             "aGb3AlQrN9E.maxresdefault.webp".to_string()
         );
         assert_eq!(
-            thumb_s3_key("aGb3AlQrN9E", &Quality::JpgMaxres),
+            thumbnail_s3_key("aGb3AlQrN9E", &Quality::JpgMaxres),
             "aGb3AlQrN9E.maxresdefault.jpg".to_string()
         );
         assert_eq!(
-            thumb_s3_key("aGb3AlQrN9E", &Quality::WebpSd),
+            thumbnail_s3_key("aGb3AlQrN9E", &Quality::WebpSd),
             "aGb3AlQrN9E.sddefault.webp".to_string()
         );
         assert_eq!(
-            thumb_s3_key("aGb3AlQrN9E", &Quality::JpgSd),
+            thumbnail_s3_key("aGb3AlQrN9E", &Quality::JpgSd),
             "aGb3AlQrN9E.sddefault.jpg".to_string()
         );
         assert_eq!(
-            thumb_s3_key("aGb3AlQrN9E", &Quality::WebpHq),
+            thumbnail_s3_key("aGb3AlQrN9E", &Quality::WebpHq),
             "aGb3AlQrN9E.hqdefault.webp".to_string()
         );
         assert_eq!(
-            thumb_s3_key("aGb3AlQrN9E", &Quality::JpgHq),
+            thumbnail_s3_key("aGb3AlQrN9E", &Quality::JpgHq),
             "aGb3AlQrN9E.hqdefault.jpg".to_string()
         );
     }
