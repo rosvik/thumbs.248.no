@@ -27,12 +27,6 @@ pub async fn get_redis_object(pool: &RedisPool, key: &str) -> Result<Option<Stri
     Ok(result)
 }
 
-pub async fn delete_redis_object(pool: &RedisPool, key: &str) -> Result<()> {
-    let mut client = pool.get()?;
-    client.del::<&str, ()>(key)?;
-    Ok(())
-}
-
 pub async fn list_redis_keys(pool: &RedisPool, pattern: &str) -> Result<Vec<String>> {
     let mut client = pool.get()?;
     let opts = ScanOptions::default()
@@ -86,11 +80,6 @@ pub async fn get_s3_object(
     key: &str,
 ) -> Result<ResponseData, s3::error::S3Error> {
     bucket.get_object(key).await
-}
-
-pub async fn delete_s3_object(bucket: &s3::Bucket, key: &str) -> Result<(), s3::error::S3Error> {
-    bucket.delete_object(key).await?;
-    Ok(())
 }
 
 // #[cfg(test)]

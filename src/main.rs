@@ -13,7 +13,7 @@ use axum::{
     },
     http::{self, HeaderMap, Response},
     response::{Html, IntoResponse},
-    routing::{delete, get},
+    routing::{get, post},
 };
 use reqwest::StatusCode;
 use tokio::sync::broadcast;
@@ -84,7 +84,7 @@ async fn main() {
         .route("/list", get(list_ids))
         .route("/firehose", get(firehose))
         .route("/avatar/{channel_id}", get(avatar::get_avatar))
-        .route("/delete/{video_id}", delete(admin_delete))
+        .route("/reload/{video_id}", post(admin_reload))
         .route("/{video_id}", get(get_thumbnail))
         .layer(Extension(state))
         .layer(CorsLayer::new().allow_origin(Any));
@@ -162,58 +162,49 @@ async fn firehose_stream(mut socket: WebSocket, mut loaded: broadcast::Receiver<
     log!("FIREHOSE: Disconnected", LogType::Debug);
 }
 
-async fn admin_delete(
+async fn admin_reload(
     headers: HeaderMap,
     Path(video_id): Path<String>,
     Extension(state): Extension<AppState>,
 ) -> impl IntoResponse {
     if !check_auth(&headers, &state) {
         log!("UNAUTHORIZED: Invalid access token", LogType::Warning);
-        return (StatusCode::UNAUTHORIZED, "Unauthorized");
+        return utils::fallback_response(401);
     }
     if !utils::validate_video_id(&video_id) {
         log!(
             "BAD REQUEST: Invalid video ID: {video_id}",
             LogType::Warning
         );
-        return (StatusCode::BAD_REQUEST, "Invalid video ID");
+        return utils::fallback_response(400);
     }
 
-    let s3_key = match get_redis_object(&state.redis_pool, &video_id).await {
+    let _ = match get_redis_object(&state.redis_pool, &video_id).await {
         Ok(Some(key)) => key,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Thumbnail not found"),
+        Ok(None) => return utils::fallback_response(404),
         Err(e) => {
             log!("ERROR: Error looking up {video_id}: {e}", LogType::Error);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Error deleting thumbnail",
-            );
+            return utils::fallback_response(500);
         }
     };
 
-    if let Err(e) = storage::delete_s3_object(&state.thumbs_bucket, &s3_key).await {
-        log!(
-            "ERROR: Error deleting {s3_key} from s3: {e}",
-            LogType::Error
-        );
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Error deleting thumbnail",
-        );
-    }
-    if let Err(e) = storage::delete_redis_object(&state.redis_pool, &video_id).await {
-        log!(
-            "ERROR: Error deleting {video_id} from redis: {e}",
-            LogType::Error
-        );
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Error deleting thumbnail",
-        );
-    }
+    let (bytes, quality) = match fetch_best_quality(&video_id).await {
+        Ok((bytes, quality)) => (bytes, quality),
+        Err(e) => return utils::fallback_response(e.as_u16()),
+    };
 
-    log!("DELETE: {video_id} - {s3_key}", LogType::Info);
-    (StatusCode::NO_CONTENT, "")
+    state.announce_load(&video_id, false);
+    save_to_cache(
+        state.thumbs_bucket,
+        &state.redis_pool,
+        &video_id,
+        &quality,
+        bytes.clone(),
+    )
+    .await;
+
+    log!("RELOAD: {video_id} - {quality}", LogType::Info);
+    thumbnail_response(bytes, &quality, false)
 }
 
 async fn get_thumbnail(
