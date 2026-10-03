@@ -245,28 +245,10 @@ async fn get_thumbnail(
         return thumbnail_response(data, &quality, true);
     }
 
-    let mut quality: Option<Quality> = None;
-    let mut body: Option<Bytes> = None;
-    for q in SUPPORTED_QUALITIES {
-        match fetch_thumbnail(&video_id, &q).await {
-            Ok(b) => {
-                body = Some(b);
-                quality = Some(q);
-                break;
-            }
-            Err(e) => {
-                if e != StatusCode::NOT_FOUND {
-                    return utils::fallback_response(e.as_u16());
-                }
-                continue;
-            }
-        }
-    }
-    if body.is_none() || quality.is_none() {
-        return utils::fallback_response(500);
-    }
-    let body = body.unwrap();
-    let quality = quality.unwrap();
+    let (bytes, quality) = match fetch_best_quality(&video_id).await {
+        Ok((body, quality)) => (body, quality),
+        Err(e) => return utils::fallback_response(e.as_u16()),
+    };
 
     state.announce_load(&video_id, false);
     save_to_cache(
@@ -274,12 +256,27 @@ async fn get_thumbnail(
         &state.redis_pool,
         &video_id,
         &quality,
-        body.clone(),
+        bytes.clone(),
     )
     .await;
 
     log!("NEW: {video_id} - {quality}", LogType::Info);
-    thumbnail_response(body, &quality, false)
+    thumbnail_response(bytes, &quality, false)
+}
+
+async fn fetch_best_quality(video_id: &str) -> Result<(Bytes, Quality), StatusCode> {
+    for quality in SUPPORTED_QUALITIES {
+        match fetch_thumbnail(&video_id, &quality).await {
+            Ok(bytes) => return Ok((bytes, quality)),
+            Err(e) => {
+                if e != StatusCode::NOT_FOUND {
+                    return Err(e);
+                }
+                continue;
+            }
+        }
+    }
+    return Err(StatusCode::NOT_FOUND);
 }
 
 async fn fetch_thumbnail(video_id: &str, quality: &Quality) -> Result<Bytes, StatusCode> {
